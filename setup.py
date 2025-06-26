@@ -1,7 +1,7 @@
-import os
-import sys
-import subprocess
 import logging
+import os
+import subprocess
+import sys
 from pathlib import Path
 from shutil import which
 
@@ -10,135 +10,161 @@ from setuptools.command.build_ext import build_ext
 from setuptools.command.develop import develop
 from setuptools.command.install import install
 
+
 def is_ninja_available() -> bool:
-  return which("ninja") is not None
+    return which("ninja") is not None
 
 
 ROOT_DIR = Path(__file__).parent
 logger = logging.getLogger(__name__)
 
+
 class CMakeExtension(Extension):
-  def __init__(self, name: str, cmake_lists_dir: str = '.', **kwa) -> None:
-    super().__init__(name, sources=[], py_limited_api=False, **kwa)
-    self.cmake_lists_dir = os.path.abspath(cmake_lists_dir)
+    def __init__(self, name: str, cmake_lists_dir: str = ".", **kwa) -> None:
+        super().__init__(name, sources=[], py_limited_api=False, **kwa)
+        self.cmake_lists_dir = os.path.abspath(cmake_lists_dir)
+
 
 class cmake_build_ext(build_ext):
 
-  def compute_num_jobs(self):
-    num_jobs = None
-    if num_jobs is not None:
-      num_jobs = int(num_jobs)
-      logger.info("Using MAX_JOBS=%d as the number of jobs.", num_jobs)
-    else:
-      try:
-        num_jobs = len(os.sched_getaffinity(0))
-      except AttributeError:
-        num_jobs = os.cpu_count()
-    num_jobs = max(1, num_jobs)
-    return num_jobs
+    def compute_num_jobs(self):
+        num_jobs = None
+        if num_jobs is not None:
+            num_jobs = int(num_jobs)
+            logger.info("Using MAX_JOBS=%d as the number of jobs.", num_jobs)
+        else:
+            try:
+                num_jobs = len(os.sched_getaffinity(0))
+            except AttributeError:
+                num_jobs = os.cpu_count()
+        num_jobs = max(1, num_jobs)
+        return num_jobs
 
-  def configure(self, ext: CMakeExtension) -> None:
-    python_executable = sys.executable
-    cmake_args = [
-      '-DCMAKE_BUILD_TYPE=Release',
-      '-DCMAKE_VERBOSE_MAKEFILE=ON',
-    ]
+    def configure(self, ext: CMakeExtension) -> None:
+        python_executable = sys.executable
+        cmake_args = [
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_VERBOSE_MAKEFILE=ON",
+        ]
 
-    ASCEND_HOME_PATH = '/usr/local/Ascend/ascend-toolkit/latest'
-    SOC_VERSION = 'Ascend910B'
-    pybind11_cmake_path = subprocess.check_output([python_executable, '-m', 'pybind11', '--cmakedir']).decode().strip()
-    torch_npu_path = subprocess.check_output([python_executable, '-c', 'import os, torch_npu; print(os.path.dirname(torch_npu.__file__))']).decode().strip()
-    torch_path = subprocess.check_output([python_executable, '-c', 'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "share", "cmake", "Torch"))']).decode().strip()
-    install_path = os.path.join(ROOT_DIR, self.build_lib)
-    if isinstance(self.distribution.get_command_obj("develop"), develop):
-      install_path = os.path.join(ROOT_DIR, "ascend910a_extras")
+        ASCEND_HOME_PATH = "/usr/local/Ascend/ascend-toolkit/latest"
+        SOC_VERSION = "Ascend910B"
+        pybind11_cmake_path = (
+            subprocess.check_output([python_executable, "-m", "pybind11", "--cmakedir"])
+            .decode()
+            .strip()
+        )
+        torch_npu_path = (
+            subprocess.check_output(
+                [
+                    python_executable,
+                    "-c",
+                    "import os, torch_npu; print(os.path.dirname(torch_npu.__file__))",
+                ]
+            )
+            .decode()
+            .strip()
+        )
+        torch_path = (
+            subprocess.check_output(
+                [
+                    python_executable,
+                    "-c",
+                    'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "share", "cmake", "Torch"))',
+                ]
+            )
+            .decode()
+            .strip()
+        )
+        install_path = os.path.join(ROOT_DIR, self.build_lib)
+        if isinstance(self.distribution.get_command_obj("develop"), develop):
+            install_path = os.path.join(ROOT_DIR, "ascend910a_extras")
 
-    cmake_args += [
-      f'-DCMAKE_INSTALL_PREFIX={install_path}',
-      f'-Dpybind11_DIR={pybind11_cmake_path}',
-      f'-DTorch_DIR={torch_path}',
-      f'-DSOC_VERSION={SOC_VERSION}',
-      f'-DTORCH_NPU_PATH={torch_npu_path}',
-      f'-DASCEND_HOME_PATH={ASCEND_HOME_PATH}',
-    ]
+        cmake_args += [
+            f"-DCMAKE_INSTALL_PREFIX={install_path}",
+            f"-Dpybind11_DIR={pybind11_cmake_path}",
+            f"-DTorch_DIR={torch_path}",
+            f"-DSOC_VERSION={SOC_VERSION}",
+            f"-DTORCH_NPU_PATH={torch_npu_path}",
+            f"-DASCEND_HOME_PATH={ASCEND_HOME_PATH}",
+        ]
 
-    num_jobs = self.compute_num_jobs()
+        num_jobs = self.compute_num_jobs()
 
-    logging.info(f'cmake_args: {cmake_args}')
+        logging.info(f"cmake_args: {cmake_args}")
 
-    subprocess.check_call(
-      ['cmake', ext.cmake_lists_dir, *cmake_args],
-      cwd=self.build_temp)
-  
-  def build_extensions(self) -> None:
-    try:
-      subprocess.check_output(['cmake', '--version'])
-    except OSError as e:
-      raise RuntimeError(f'Cannot find CMake executable: {e}')
-    
-    if not os.path.exists(self.build_temp):
-      os.makedirs(self.build_temp)
-    
-    targets = []
+        subprocess.check_call(
+            ["cmake", ext.cmake_lists_dir, *cmake_args], cwd=self.build_temp
+        )
 
+    def build_extensions(self) -> None:
+        try:
+            subprocess.check_output(["cmake", "--version"])
+        except OSError as e:
+            raise RuntimeError(f"Cannot find CMake executable: {e}")
 
-    def target_name(name: str) -> str:
-      return name.removeprefix('ascend910a_extras.')
+        if not os.path.exists(self.build_temp):
+            os.makedirs(self.build_temp)
 
-    for ext in self.extensions:
-      self.configure(ext)
-      targets.append(target_name(ext.name))
+        targets = []
 
-    num_jobs = self.compute_num_jobs()
+        def target_name(name: str) -> str:
+            return name.removeprefix("ascend910a_extras.")
 
-    build_args = [
-      "--build",
-      ".",
-      f"-j={num_jobs}",
-      *[f"--target={target}" for target in targets],
-    ]
+        for ext in self.extensions:
+            self.configure(ext)
+            targets.append(target_name(ext.name))
 
-    subprocess.check_call(["cmake", *build_args], cwd=self.build_temp)
+        num_jobs = self.compute_num_jobs()
 
-    install_args = [
-      "cmake",
-      "--install",
-      ".",
-    ]
-    try:
-      subprocess.check_call(install_args, cwd=self.build_temp)
-    except OSError as e:
-      raise RuntimeError(f"Install library failed: {e}")
+        build_args = [
+            "--build",
+            ".",
+            f"-j={num_jobs}",
+            *[f"--target={target}" for target in targets],
+        ]
 
-    os.makedirs(os.path.join(self.build_lib, "ascend910a_extras"), exist_ok=True)
-    if isinstance(self.distribution.get_command_obj("develop"), develop):
-      import shutil
-      for root, _, files in os.walk(self.build_temp):
-        for file in files:
-          if file.endswith(".so"):
-            src_path = os.path.join(root, file)
-            dst_path = os.path.join(self.build_lib, "ascend910a_extras", file)
-            shutil.copy(src_path, dst_path)
-            print(f"Copy: {src_path} -> {dst_path}")
+        subprocess.check_call(["cmake", *build_args], cwd=self.build_temp)
 
+        install_args = [
+            "cmake",
+            "--install",
+            ".",
+        ]
+        try:
+            subprocess.check_call(install_args, cwd=self.build_temp)
+        except OSError as e:
+            raise RuntimeError(f"Install library failed: {e}")
 
-  def run(self):
-    super().run()
+        os.makedirs(os.path.join(self.build_lib, "ascend910a_extras"), exist_ok=True)
+        if isinstance(self.distribution.get_command_obj("develop"), develop):
+            import shutil
+
+            for root, _, files in os.walk(self.build_temp):
+                for file in files:
+                    if file.endswith(".so"):
+                        src_path = os.path.join(root, file)
+                        dst_path = os.path.join(
+                            self.build_lib, "ascend910a_extras", file
+                        )
+                        shutil.copy(src_path, dst_path)
+                        print(f"Copy: {src_path} -> {dst_path}")
+
+    def run(self):
+        super().run()
 
 
 class custom_install(install):
 
-  def run(self):
-    self.run_command("build_ext")
-    install.run(self)
+    def run(self):
+        self.run_command("build_ext")
+        install.run(self)
 
 
 setup(
-  ext_modules=[
-    CMakeExtension(name="ascend910a_extras.ascend910a_extras_C")
-  ],
-  cmdclass={
-    "build_ext": cmake_build_ext,
-    "install": custom_install,
-  }
+    ext_modules=[CMakeExtension(name="ascend910a_extras.ascend910a_extras_C")],
+    cmdclass={
+        "build_ext": cmake_build_ext,
+        "install": custom_install,
+    },
 )

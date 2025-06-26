@@ -1,5 +1,7 @@
 import torch
+
 import ascend910a_extras.ops as ops
+
 
 def swiglu_cpu(x):
     x1, x2 = x.chunk(2, -1)
@@ -9,13 +11,14 @@ def swiglu_cpu(x):
     # out = x1_f32
     return out.to(x.dtype)
 
+
 if __name__ == "__main__":
     torch.manual_seed(0)
     num_tokens = 2048
     # dim = 12288
     dim = 1024
     dtype = torch.float16
-    x_npu = torch.randn(num_tokens, dim * 2, device='npu', dtype=dtype)
+    x_npu = torch.randn(num_tokens, dim * 2, device="npu", dtype=dtype)
     # x_npu = torch.arange(num_tokens * dim * 2).view(num_tokens, dim * 2).to(dtype).to('npu')
     print(f"Input tensor: {x_npu.shape}, {x_npu.dtype}, {x_npu.device}")
     print(f"{x_npu=}")

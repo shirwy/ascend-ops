@@ -8,7 +8,7 @@
 __global__ __aicore__ void swiglu_kernel_f16(
     __gm__ uint8_t* input,
     __gm__ uint8_t* output,
-    int dim, 
+    int dim,
     int64_t stride,
     int64_t out_stride,
     int64_t num_tokens,
@@ -46,7 +46,7 @@ __global__ __aicore__ void swiglu_kernel_f16(
             AscendC::DataCopy(x1_copy, input_tensor[dim + dim_i], BLOCK_SIZE_DIM);
             x0_que.EnQue(x0_copy);
             x1_que.EnQue(x1_copy);
-            
+
 
             AscendC::LocalTensor<scalar_t> y = out_que.AllocTensor<scalar_t>();
             AscendC::LocalTensor<scalar_t> x0 = x0_que.DeQue<scalar_t>();
