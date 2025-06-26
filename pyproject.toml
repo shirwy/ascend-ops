@@ -1,0 +1,26 @@
+[build-system]
+requires = [
+  "cmake",
+  "setuptools>=64",
+  "setuptools-scm>=8.0",
+  "wheel",
+  "packaging",
+  "pybind11",
+  "pyyaml",
+  "numpy",
+  "torch-npu==2.5.1.post1.dev20250619",
+  "torch==2.5.1",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ascend910a_extras"
+version = "0.0.0"
+description = "Ascend 910A custom ops"
+dependencies = [
+  "torch==2.5.1",
+  "torch-npu==2.5.1.post1.dev20250619",
+]
+
+[tool.setuptools]
+packages = ["ascend910a_extras"]

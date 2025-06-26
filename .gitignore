@@ -1,0 +1,6 @@
+*.egg-info
+*.json
+*.so
+__pycache__
+include
+lib64
