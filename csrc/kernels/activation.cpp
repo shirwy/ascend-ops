@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <assert.h>
 
+#include "type.h"
+
 __global__ __aicore__ void swiglu_kernel_f16(
     __gm__ uint8_t* input,
     __gm__ uint8_t* output,
@@ -75,15 +77,15 @@ __global__ __aicore__ void swiglu_kernel_f16(
 
 namespace native {
 
-void swiglu_impl(void *stream, uint8_t* input, uint8_t* output, int dim, int64_t stride, int64_t out_stride, int64_t num_tokens, uint32_t aiv_num) {
+void swiglu_impl(ScalarType dtype, void *stream, uint8_t* input, uint8_t* output, int dim, int64_t stride, int64_t out_stride, int64_t num_tokens, uint32_t aiv_num) {
     int64_t block_dim = (num_tokens < 65535) ? num_tokens : 65535;
     assert(dim >= 128 && dim % 128 == 0 && "swiglu_impl: dim must be a multiple of 128");
-    // if (type == AscendType::FP16) {
+    if (dtype == ScalarType::FP16) {
         swiglu_kernel_f16<<<block_dim, nullptr, stream>>>(input, output,
             dim, stride, out_stride, num_tokens, block_dim);
-    // } else {
-    //     assert(false && "Unsupported data type for swiglu_impl");
-    // }
+    } else {
+        assert(false && "Unsupported data type for swiglu_impl");
+    }
 }
 
 
