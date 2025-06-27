@@ -9,8 +9,6 @@
 #include "tiling/platform/platform_ascendc.h"
 #include "aclnn/opdev/platform.h"
 #include <vector>
-#include "utils.h"
-
 
 namespace native {
 
@@ -49,9 +47,9 @@ at::Tensor swiglu(const at::Tensor& x) {
 
 } // namespace native
 
-TORCH_LIBRARY_EXPAND(ascend910a, ops) {
-  ops.def("swiglu(Tensor x) -> Tensor");
-  ops.impl("swiglu", torch::kPrivateUse1, &native::swiglu);
+TORCH_LIBRARY(ascend910a, m) {
+  m.def("swiglu(Tensor x) -> Tensor");
+  m.impl("swiglu", torch::kPrivateUse1, &native::swiglu);
 }
 
 PYBIND11_MODULE(ascend910a_extras_C, m) {

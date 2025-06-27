@@ -8,8 +8,8 @@ requires = [
   "pybind11",
   "pyyaml",
   "numpy",
-  "torch-npu==2.5.1.post1.dev20250619",
   "torch==2.5.1",
+  "torch-npu==2.5.1.post1.dev20250619",
 ]
 build-backend = "setuptools.build_meta"
 

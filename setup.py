@@ -10,9 +10,13 @@ from setuptools.command.build_ext import build_ext
 from setuptools.command.develop import develop
 from setuptools.command.install import install
 
-
-def is_ninja_available() -> bool:
-    return which("ninja") is not None
+ASCEND_HOME_PATH = os.environ.get(
+    "ASCEND_HOME_PATH", "/usr/local/Ascend/ascend-toolkit/latest"
+)
+SOC_VERSION = os.environ.get("SOC_VERSION", "Ascend910B")
+CMAKE_BUILD_TYPE = os.environ.get("CMAKE_BUILD_TYPE", "Release")
+MAX_JOBS = os.environ.get("MAX_JOBS", None)
+VERBOSE = bool(int(os.environ.get("VERBOSE", "0")))
 
 
 ROOT_DIR = Path(__file__).parent
@@ -28,7 +32,7 @@ class CMakeExtension(Extension):
 class cmake_build_ext(build_ext):
 
     def compute_num_jobs(self):
-        num_jobs = None
+        num_jobs = MAX_JOBS
         if num_jobs is not None:
             num_jobs = int(num_jobs)
             logger.info("Using MAX_JOBS=%d as the number of jobs.", num_jobs)
@@ -43,12 +47,11 @@ class cmake_build_ext(build_ext):
     def configure(self, ext: CMakeExtension) -> None:
         python_executable = sys.executable
         cmake_args = [
-            "-DCMAKE_BUILD_TYPE=Release",
-            "-DCMAKE_VERBOSE_MAKEFILE=ON",
+            f"-DCMAKE_BUILD_TYPE={CMAKE_BUILD_TYPE}",
         ]
+        if VERBOSE:
+            cmake_args += ["-DCMAKE_VERBOSE_MAKEFILE=ON"]
 
-        ASCEND_HOME_PATH = "/usr/local/Ascend/ascend-toolkit/latest"
-        SOC_VERSION = "Ascend910B"
         pybind11_cmake_path = (
             subprocess.check_output([python_executable, "-m", "pybind11", "--cmakedir"])
             .decode()
@@ -77,8 +80,8 @@ class cmake_build_ext(build_ext):
             .strip()
         )
         install_path = os.path.join(ROOT_DIR, self.build_lib)
-        if isinstance(self.distribution.get_command_obj("develop"), develop):
-            install_path = os.path.join(ROOT_DIR, "ascend910a_extras")
+        # if isinstance(self.distribution.get_command_obj("develop"), develop):
+        #     install_path = os.path.join(ROOT_DIR, "ascend910a_extras")
 
         cmake_args += [
             f"-DCMAKE_INSTALL_PREFIX={install_path}",
