@@ -1,7 +1,7 @@
 import torch
 import torch_npu
 
-import ascend910a_extras.ascend910a_extras_C
+import ascend910a_extras.ascend910a_extras_C as _C
 
 
 def swiglu(x: torch.Tensor) -> torch.Tensor:
@@ -16,3 +16,8 @@ def grouped_matmul(
 
 def matmul(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
     return torch.ops.ascend910a.matmul(x, w)
+
+
+def print_info():
+    device_id = torch.npu.current_device()
+    _C.print_info(device_id)
