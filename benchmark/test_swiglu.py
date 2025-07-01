@@ -16,7 +16,8 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     num_tokens = 2048
     # dim = 12288
-    dim = 1024
+    # dim = 1024
+    dim = 192
     dtype = torch.float16
     x_npu = torch.randn(num_tokens, dim * 2, device="npu", dtype=dtype)
     # x_npu = torch.arange(num_tokens * dim * 2).view(num_tokens, dim * 2).to(dtype).to('npu')

@@ -18,7 +18,7 @@ __global__ __aicore__ void swiglu_kernel_f16(
 ) {
     using scalar_t = half;
     using acc_t = float;
-    constexpr int BLOCK_SIZE_DIM = 128;
+    constexpr int BLOCK_SIZE_DIM = 64;
     __gm__ scalar_t *x_ptr = reinterpret_cast<__gm__ scalar_t *>(input);
     __gm__ scalar_t *y_ptr = reinterpret_cast<__gm__ scalar_t *>(output);
 

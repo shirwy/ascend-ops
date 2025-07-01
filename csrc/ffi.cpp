@@ -37,8 +37,8 @@ ScalarType get_dtype_from_torch(at::ScalarType dtype) {
 at::Tensor swiglu(const at::Tensor& x) {
   TORCH_CHECK(x.dim() == 2,
               "swiglu: input tensor must be 2D, got ", x.dim(), "D tensor");
-  TORCH_CHECK(x.size(-1) >= 256 && x.size(-1) % 256 == 0,
-              "swiglu: last dimension must be a multiple of 256, got ", x.size(-1));
+  TORCH_CHECK(x.size(-1) >= 64 && x.size(-1) % 64 == 0,
+              "swiglu: last dimension must be a multiple of 64, got ", x.size(-1));
   TORCH_CHECK(x.is_contiguous(),
               "swiglu: input tensor must be contiguous");
 
@@ -86,8 +86,8 @@ at::Tensor grouped_matmul(const at::Tensor& x, const at::Tensor& w, const at::Te
               "grouped_matmul: x and group_list must be contiguous tensors");
   TORCH_CHECK(w.stride(1) == 1 && w.stride(2) == dim,
               "grouped_matmul: w must be K-major order, got strides ", w.strides());
-  TORCH_CHECK(w.size(1) % 128 == 0 && w.size(2) % 128 == 0,
-              "grouped_matmul: second and third dimensions of w must be multiples of 128, got ", w.size(1), " and ", w.size(2));
+  TORCH_CHECK(w.size(1) % 64 == 0 && w.size(2) % 64 == 0,
+              "grouped_matmul: second and third dimensions of w must be multiples of 64, got ", w.size(1), " and ", w.size(2));
 
   uint8_t* x_ptr = reinterpret_cast<uint8_t*>(x.data_ptr());
   uint8_t* w_ptr = reinterpret_cast<uint8_t*>(w.data_ptr());

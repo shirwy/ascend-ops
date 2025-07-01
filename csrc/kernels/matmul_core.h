@@ -7,9 +7,9 @@
 template<typename scalar_t, typename acc_t, typename id_t>
 class MatMulNT {
 public:
-    static constexpr int BLOCK_M = 128;
-    static constexpr int BLOCK_K = 128;
-    static constexpr int BLOCK_N = 128;
+    static constexpr int BLOCK_M = 64;
+    static constexpr int BLOCK_K = 64;
+    static constexpr int BLOCK_N = 64;
 
     AscendC::TPipe pipe;
     AscendC::TQue<AscendC::TPosition::A1, 1> a1_que;
