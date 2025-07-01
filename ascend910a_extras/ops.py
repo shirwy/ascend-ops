@@ -12,3 +12,7 @@ def grouped_matmul(
     x: torch.Tensor, w: torch.Tensor, group_list: torch.Tensor
 ) -> torch.Tensor:
     return torch.ops.ascend910a.grouped_matmul(x, w, group_list)
+
+
+def matmul(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+    return torch.ops.ascend910a.matmul(x, w)
