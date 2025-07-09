@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -79,9 +80,9 @@ class cmake_build_ext(build_ext):
             .decode()
             .strip()
         )
-        install_path = os.path.join(ROOT_DIR, self.build_lib)
-        # if isinstance(self.distribution.get_command_obj("develop"), develop):
-        #     install_path = os.path.join(ROOT_DIR, "ascend910a_extras")
+
+        # Should use absolute path
+        install_path = os.path.abspath(self.build_lib)
 
         cmake_args += [
             f"-DCMAKE_INSTALL_PREFIX={install_path}",
@@ -92,9 +93,11 @@ class cmake_build_ext(build_ext):
             f"-DASCEND_HOME_PATH={ASCEND_HOME_PATH}",
         ]
 
-        num_jobs = self.compute_num_jobs()
+        # num_jobs = self.compute_num_jobs()
 
         logging.info(f"cmake_args: {cmake_args}")
+        logging.info(f"cmake_lists_dir: {ext.cmake_lists_dir}")
+        logging.info(f"pwd: {os.getcwd()}")
 
         subprocess.check_call(
             ["cmake", ext.cmake_lists_dir, *cmake_args], cwd=self.build_temp
@@ -134,24 +137,25 @@ class cmake_build_ext(build_ext):
             "--install",
             ".",
         ]
+
+        logger.info(f"install_args: {install_args}")
         try:
             subprocess.check_call(install_args, cwd=self.build_temp)
         except OSError as e:
             raise RuntimeError(f"Install library failed: {e}")
 
-        os.makedirs(os.path.join(self.build_lib, "ascend910a_extras"), exist_ok=True)
-        if isinstance(self.distribution.get_command_obj("develop"), develop):
-            import shutil
-
-            for root, _, files in os.walk(self.build_temp):
-                for file in files:
-                    if file.endswith(".so"):
-                        src_path = os.path.join(root, file)
-                        dst_path = os.path.join(
-                            self.build_lib, "ascend910a_extras", file
-                        )
-                        shutil.copy(src_path, dst_path)
-                        print(f"Copy: {src_path} -> {dst_path}")
+        # we need to manually copy opp_install to support -e mode
+        build_opp_install = os.path.join(
+            self.build_lib, "ascend910a_extras", "opp_install"
+        )
+        src_opp_install = os.path.join(ROOT_DIR, "ascend910a_extras", "opp_install")
+        if os.path.exists(build_opp_install):
+            if os.path.exists(src_opp_install):
+                shutil.rmtree(src_opp_install)
+            shutil.copytree(build_opp_install, src_opp_install)
+            print(f"Manually Copy: {build_opp_install} -> {src_opp_install}")
+        else:
+            print(f"build_opp_install: {build_opp_install} not found")
 
     def run(self):
         super().run()

@@ -5,3 +5,8 @@
 __pycache__
 include
 lib64
+
+
+build/
+build_out/
+opp_install/

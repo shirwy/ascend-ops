@@ -7,14 +7,17 @@
 template<typename scalar_t, typename acc_t, typename id_t>
 class MatMulNT {
 public:
-    static constexpr int BLOCK_M = 64;
-    static constexpr int BLOCK_K = 64;
-    static constexpr int BLOCK_N = 64;
+    static constexpr int BLOCK_M = 128;
+    static constexpr int BLOCK_K = 128;
+    static constexpr int BLOCK_N = 128;
+
+    static constexpr int L1_STAGE = 1;
+    // static constexpr int L1_STAGE = 2;
 
     AscendC::TPipe pipe;
-    AscendC::TQue<AscendC::TPosition::A1, 1> a1_que;
+    AscendC::TQue<AscendC::TPosition::A1, L1_STAGE> a1_que;
     AscendC::TQue<AscendC::TPosition::A2, 1> a2_que;
-    AscendC::TQue<AscendC::TPosition::B1, 1> b1_que;
+    AscendC::TQue<AscendC::TPosition::B1, L1_STAGE> b1_que;
     AscendC::TQue<AscendC::TPosition::B2, 1> b2_que;
     AscendC::TQue<AscendC::TPosition::CO1, 1> co1_que;
     AscendC::TQue<AscendC::TPosition::CO2, 1> co2_que;
@@ -42,12 +45,20 @@ public:
                 this->curr_block_m = (m - mi < BLOCK_M) ? (m - mi) : BLOCK_M;
                 c_gm.SetGlobalBuffer(c + mi * n + ni);
                 AscendC::LocalTensor<acc_t> acc = co1_que.AllocTensor<acc_t>();
-                for (int ki = 0; ki < k; ki += BLOCK_K) {
+                // for (int ki = 0; ki < k; ki += BLOCK_K) {
+                for (int ki = 0; ki < k; ki += BLOCK_K * L1_STAGE) {
                     a_gm.SetGlobalBuffer(a + mi * k + ki);
                     b_gm.SetGlobalBuffer(b + ni * k + ki);
                     CopyGmToL2();
                     CopyL2ToL1();
                     Mma(acc, ki == 0);
+                    // for (int s = 0; s < L1_STAGE; ++s) {
+                    // // for (int s = 1; s < L1_STAGE; ++s) {
+                    // // for (int s = 0; s < 1; ++s) {
+                    //     CopyGmToL2Staged(s);
+                    //     CopyL2ToL1();
+                    //     Mma(acc, ki == 0);
+                    // }
                 }
                 co1_que.EnQue(acc);
                 CopyCO1ToCO2();
@@ -57,9 +68,9 @@ public:
     }
 
     __aicore__ inline void InitPipe() {
-        pipe.InitBuffer(a1_que, 1, BLOCK_M * BLOCK_K * sizeof(scalar_t));
+        pipe.InitBuffer(a1_que, L1_STAGE, BLOCK_M * BLOCK_K * sizeof(scalar_t));
         pipe.InitBuffer(a2_que, 1, BLOCK_M * BLOCK_K * sizeof(scalar_t));
-        pipe.InitBuffer(b1_que, 1, BLOCK_K * BLOCK_N * sizeof(scalar_t));
+        pipe.InitBuffer(b1_que, L1_STAGE, BLOCK_K * BLOCK_N * sizeof(scalar_t));
         pipe.InitBuffer(b2_que, 1, BLOCK_K * BLOCK_N * sizeof(scalar_t));
         pipe.InitBuffer(co1_que, 1, BLOCK_M * BLOCK_N * sizeof(acc_t));
         pipe.InitBuffer(co2_que, 1, BLOCK_M * BLOCK_N * sizeof(acc_t));
@@ -95,6 +106,26 @@ public:
         // for b (transposed): dn -> zn
         for (int i = 0; i < BLOCK_K / 16; ++i) {
             int src_offset = i * 16;
+            int dst_offset = i * 16 * BLOCK_N;
+            AscendC::DataCopy(b1[dst_offset], b_gm[src_offset], { BLOCK_N, 1, uint16_t(k / 16 - 1), 0 });
+        }
+
+        a1_que.EnQue(a1);
+        b1_que.EnQue(b1);
+    }
+
+    __aicore__ inline void CopyGmToL2Staged(int stage) {
+        AscendC::LocalTensor<scalar_t> a1 = a1_que.AllocTensor<scalar_t>();
+        AscendC::LocalTensor<scalar_t> b1 = b1_que.AllocTensor<scalar_t>();
+        // for a: nd -> nz
+        for (int i = 0; i < BLOCK_K / 16; ++i) {
+            int src_offset = i * 16 + stage * BLOCK_K;
+            int dst_offset = i * 16 * BLOCK_M;
+            AscendC::DataCopy(a1[dst_offset], a_gm[src_offset], { this->curr_block_m, 1, uint16_t(k / 16 - 1), 0});
+        }
+        // for b (transposed): dn -> zn
+        for (int i = 0; i < BLOCK_K / 16; ++i) {
+            int src_offset = i * 16 + stage * BLOCK_K;
             int dst_offset = i * 16 * BLOCK_N;
             AscendC::DataCopy(b1[dst_offset], b_gm[src_offset], { BLOCK_N, 1, uint16_t(k / 16 - 1), 0 });
         }
@@ -141,6 +172,14 @@ public:
         params.k = BLOCK_K;
         params.cmatrixInitVal = zeroed;
         AscendC::Mmad(acc, a2, b2, params);
+        // for (int i = 0; i < 10; ++i) {
+        //     AscendC::MmadParams params;
+        //     params.m = BLOCK_M;
+        //     params.n = BLOCK_N;
+        //     params.k = BLOCK_K;
+        //     params.cmatrixInitVal = i == 0;
+        //     AscendC::Mmad(acc, a2, b2, params);
+        // }
 
         a2_que.FreeTensor(a2);
         b2_que.FreeTensor(b2);
