@@ -1,0 +1,13 @@
+--extra-index-url https://mirrors.huaweicloud.com/ascend/repos/pypi
+
+--pre
+cmake
+numpy<2.0.0
+packaging
+pybind11
+pyyaml
+setuptools>=64
+setuptools-scm>=8.0
+torch==2.5.1
+torch-npu==2.5.1.post1.dev20250619
+wheel
