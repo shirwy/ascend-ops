@@ -2,6 +2,8 @@ import ctypes
 import os
 import pathlib
 
+import torch
+
 opp_path = pathlib.Path(__file__).parent / "opp_install" / "vendors" / "customize"
 lib_path = (
     pathlib.Path(__file__).parent

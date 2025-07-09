@@ -20,8 +20,8 @@
 
 namespace native {
 
-extern at::Tensor swiglu(at::Tensor x);
-extern at::Tensor grouped_matmul(at::Tensor x, at::Tensor w, at::Tensor group_list);
+extern void init_ffi_graph(py::module_ &&m);
+extern void init_ffi_ops(py::module_ &&m);
 
 int print_info(int device_id) {
   fe::PlatFormInfos platform_infos;
@@ -50,10 +50,12 @@ int print_info(int device_id) {
   return 0;
 }
 
+
 }
 
 PYBIND11_MODULE(ascend910a_extras_C, m) {
   m.def("print_info", &native::print_info, "Print info about the device");
-  m.def("swiglu", &native::swiglu, "Swiglu");
-  m.def("grouped_matmul", &native::grouped_matmul, "GroupedMatMul");
+
+  native::init_ffi_ops(m.def_submodule("ops"));
+  native::init_ffi_graph(m.def_submodule("graph"));
 }
