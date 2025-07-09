@@ -23,7 +23,6 @@ at::Tensor swiglu(at::Tensor x) {
 
   aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
   aclTensor *x_acl = aclCreateTensor(x_sizes.data(), x.dim(), ACL_FLOAT16, x_strides.data(), 0, ACL_FORMAT_ND, x_sizes.data(), x.dim(), x.data_ptr());
-  assert(x_acl != nullptr);
   if (x_acl == nullptr) {
     throw std::runtime_error("Failed to create ACL tensor");
   }

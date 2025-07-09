@@ -23,3 +23,5 @@ else:
     os.environ["ASCEND_CUSTOM_OPP_PATH"] = (
         f"{opp_path}:{os.environ['ASCEND_CUSTOM_OPP_PATH']}"
     )
+
+# print(f"ASCEND_CUSTOM_OPP_PATH: {os.environ['ASCEND_CUSTOM_OPP_PATH']}")

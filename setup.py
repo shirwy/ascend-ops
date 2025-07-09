@@ -99,6 +99,14 @@ class cmake_build_ext(build_ext):
         logging.info(f"cmake_lists_dir: {ext.cmake_lists_dir}")
         logging.info(f"pwd: {os.getcwd()}")
 
+        # FIXME: clean build_out, hardcoded path from build.sh
+        build_out_path = os.path.join(ROOT_DIR, "csrc", "opdev", "build_out")
+        if os.path.exists(build_out_path):
+            shutil.rmtree(build_out_path)
+            logger.info(f"Remove: {build_out_path}")
+        else:
+            logger.info(f"build_out_path: {build_out_path} not found, skip clean")
+
         subprocess.check_call(
             ["cmake", ext.cmake_lists_dir, *cmake_args], cwd=self.build_temp
         )
@@ -152,6 +160,7 @@ class cmake_build_ext(build_ext):
         if os.path.exists(build_opp_install):
             if os.path.exists(src_opp_install):
                 shutil.rmtree(src_opp_install)
+                print(f"Remove: {src_opp_install}")
             shutil.copytree(build_opp_install, src_opp_install)
             print(f"Manually Copy: {build_opp_install} -> {src_opp_install}")
         else:
