@@ -10,3 +10,6 @@ lib64
 build/
 build_out/
 opp_install/
+
+
+!csrc/opdev/CMakePresets.json
