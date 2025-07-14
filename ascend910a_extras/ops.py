@@ -15,10 +15,7 @@ def grouped_matmul(
 
 
 def add_rms_norm(
-    x: torch.Tensor, 
-    residual: torch.Tensor, 
-    weight: torch.Tensor, 
-    epsilon: float = 1e-5
+    x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, epsilon: float = 1e-5
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return _C.ops.add_rms_norm(x, residual, weight, epsilon)
 

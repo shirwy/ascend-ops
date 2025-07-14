@@ -7,11 +7,11 @@ extern "C" __global__ __aicore__ void add_rms_norm_ex(
     int num_tokens = tiling_data.num_tokens;
     int dim = tiling_data.dim;
     int core_num = tiling_data.core_num;
-    
+
     using scalar_t = half;
     using acc_t = float;
     constexpr int BLOCK_SIZE_DIM = 64;
-    
+
     __gm__ scalar_t *x_ptr = reinterpret_cast<__gm__ scalar_t *>(x);
     __gm__ scalar_t *r_ptr = reinterpret_cast<__gm__ scalar_t *>(residual);
     __gm__ scalar_t *w_ptr = reinterpret_cast<__gm__ scalar_t *>(weight);

@@ -18,12 +18,12 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
   int num_tokens = x1_shape->GetStorageShape().GetDim(0);
   int dim = x1_shape->GetStorageShape().GetDim(1);
   int core_num = (num_tokens < 65535) ? num_tokens : 65535;
-  
+
   // 设置tiling参数
   tiling.set_num_tokens(num_tokens);
   tiling.set_dim(dim);
   tiling.set_core_num(core_num);
-  
+
   context->SetBlockDim(core_num);
   tiling.SaveToBuffer(context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
   context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());
@@ -40,7 +40,7 @@ static ge::graphStatus InferShape(gert::InferShapeContext* context)
     const gert::Shape* residual_shape = context->GetInputShape(1);
     const gert::Shape* weight_shape = context->GetInputShape(2);
     const gert::Shape* epsilon_shape = context->GetInputShape(3);
-    
+
     // 输出shape与输入x相同
     int num_tokens = x1_shape->GetDim(0);
     int dim = x1_shape->GetDim(1);

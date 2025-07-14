@@ -151,7 +151,7 @@ std::tuple<at::Tensor, at::Tensor> add_rms_norm(at::Tensor x, at::Tensor residua
   at::Tensor residual_output = at::empty({num_tokens, dim}, x.options());
 
   aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
-  
+
   // Create ACL tensors
   auto x_sizes = x.sizes();
   auto x_strides = x.strides();
@@ -159,21 +159,21 @@ std::tuple<at::Tensor, at::Tensor> add_rms_norm(at::Tensor x, at::Tensor residua
   if (x_acl == nullptr) {
     throw std::runtime_error("Failed to create ACL tensor for x");
   }
-  
+
   auto residual_sizes = residual.sizes();
   auto residual_strides = residual.strides();
   aclTensor* residual_acl = aclCreateTensor(residual_sizes.data(), residual.dim(), ACL_FLOAT16, residual_strides.data(), 0, ACL_FORMAT_ND, residual_sizes.data(), residual.dim(), residual.data_ptr());
   if (residual_acl == nullptr) {
     throw std::runtime_error("Failed to create ACL tensor for residual");
   }
-  
+
   auto weight_sizes = weight.sizes();
   auto weight_strides = weight.strides();
   aclTensor* weight_acl = aclCreateTensor(weight_sizes.data(), weight.dim(), ACL_FLOAT16, weight_strides.data(), 0, ACL_FORMAT_ND, weight_sizes.data(), weight.dim(), weight.data_ptr());
   if (weight_acl == nullptr) {
     throw std::runtime_error("Failed to create ACL tensor for weight");
   }
-  
+
   // Create epsilon tensor (optional parameter)
   at::Tensor epsilon_tensor = at::tensor({epsilon}, at::TensorOptions().dtype(torch::kFloat32).device(x.device()));
   auto epsilon_sizes = epsilon_tensor.sizes();
@@ -182,7 +182,7 @@ std::tuple<at::Tensor, at::Tensor> add_rms_norm(at::Tensor x, at::Tensor residua
   if (epsilon_acl == nullptr) {
     throw std::runtime_error("Failed to create ACL tensor for epsilon");
   }
-  
+
   auto y_sizes = y.sizes();
   auto y_strides = y.strides();
   aclTensor* y_acl = aclCreateTensor(y_sizes.data(), y.dim(), ACL_FLOAT16, y_strides.data(), 0, ACL_FORMAT_ND, y_sizes.data(), y.dim(), y.data_ptr());
