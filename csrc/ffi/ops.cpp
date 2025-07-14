@@ -2,6 +2,8 @@
 #include <torch_npu/csrc/core/npu/NPUStream.h>
 #include "aclnn_swi_glu_ex.h"
 #include "aclnn_grouped_mat_mul_ex.h"
+#include "aclnn_add_rms_norm_ex.h"
+#include <tuple>
 
 namespace native {
 
@@ -130,9 +132,110 @@ at::Tensor grouped_matmul(at::Tensor x, at::Tensor w, at::Tensor group_list) {
   return y;
 }
 
+
+std::tuple<at::Tensor, at::Tensor> add_rms_norm(at::Tensor x, at::Tensor residual, at::Tensor weight, float epsilon) {
+  TORCH_CHECK(x.dim() == 2 && residual.dim() == 2 && weight.dim() == 1,
+              "add_rms_norm: x and residual must be 2D, weight must be 1D");
+  TORCH_CHECK(x.size(1) == weight.size(0),
+              "add_rms_norm: last dimension of x must match weight size, got ", x.size(1), " and ", weight.size(0));
+  TORCH_CHECK(x.size(0) == residual.size(0) && x.size(1) == residual.size(1),
+              "add_rms_norm: x and residual must have the same shape, got ", x.sizes(), " and ", residual.sizes());
+  TORCH_CHECK(x.is_contiguous() && residual.is_contiguous() && weight.is_contiguous(),
+              "add_rms_norm: all input tensors must be contiguous");
+  TORCH_CHECK(x.size(1) % 64 == 0,
+              "add_rms_norm: last dimension must be a multiple of 64, got ", x.size(1));
+
+  int num_tokens = x.size(0);
+  int dim = x.size(1);
+  at::Tensor y = at::empty({num_tokens, dim}, x.options());
+  at::Tensor residual_output = at::empty({num_tokens, dim}, x.options());
+
+  aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+  
+  // Create ACL tensors
+  auto x_sizes = x.sizes();
+  auto x_strides = x.strides();
+  aclTensor* x_acl = aclCreateTensor(x_sizes.data(), x.dim(), ACL_FLOAT16, x_strides.data(), 0, ACL_FORMAT_ND, x_sizes.data(), x.dim(), x.data_ptr());
+  if (x_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for x");
+  }
+  
+  auto residual_sizes = residual.sizes();
+  auto residual_strides = residual.strides();
+  aclTensor* residual_acl = aclCreateTensor(residual_sizes.data(), residual.dim(), ACL_FLOAT16, residual_strides.data(), 0, ACL_FORMAT_ND, residual_sizes.data(), residual.dim(), residual.data_ptr());
+  if (residual_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for residual");
+  }
+  
+  auto weight_sizes = weight.sizes();
+  auto weight_strides = weight.strides();
+  aclTensor* weight_acl = aclCreateTensor(weight_sizes.data(), weight.dim(), ACL_FLOAT16, weight_strides.data(), 0, ACL_FORMAT_ND, weight_sizes.data(), weight.dim(), weight.data_ptr());
+  if (weight_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for weight");
+  }
+  
+  // Create epsilon tensor (optional parameter)
+  at::Tensor epsilon_tensor = at::tensor({epsilon}, at::TensorOptions().dtype(torch::kFloat32).device(x.device()));
+  auto epsilon_sizes = epsilon_tensor.sizes();
+  auto epsilon_strides = epsilon_tensor.strides();
+  aclTensor* epsilon_acl = aclCreateTensor(epsilon_sizes.data(), epsilon_tensor.dim(), ACL_FLOAT, epsilon_strides.data(), 0, ACL_FORMAT_ND, epsilon_sizes.data(), epsilon_tensor.dim(), epsilon_tensor.data_ptr());
+  if (epsilon_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for epsilon");
+  }
+  
+  auto y_sizes = y.sizes();
+  auto y_strides = y.strides();
+  aclTensor* y_acl = aclCreateTensor(y_sizes.data(), y.dim(), ACL_FLOAT16, y_strides.data(), 0, ACL_FORMAT_ND, y_sizes.data(), y.dim(), y.data_ptr());
+  if (y_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for y");
+  }
+
+  auto residual_output_sizes = residual_output.sizes();
+  auto residual_output_strides = residual_output.strides();
+  aclTensor* residual_output_acl = aclCreateTensor(residual_output_sizes.data(), residual_output.dim(), ACL_FLOAT16, residual_output_strides.data(), 0, ACL_FORMAT_ND, residual_output_sizes.data(), residual_output.dim(), residual_output.data_ptr());
+  if (residual_output_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for residual_output");
+  }
+
+  // Get workspace size and execute
+  uint64_t workspace_size = 0;
+  aclOpExecutor* handle = nullptr;
+  if (aclnnAddRMSNormExGetWorkspaceSize(x_acl, residual_acl, weight_acl, epsilon_acl, y_acl, residual_output_acl, &workspace_size, &handle) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to get workspace size");
+  }
+  auto options = at::TensorOptions().dtype(torch::kUInt8).device(x.device());
+  auto workspace_tensor = at::empty({(int64_t)workspace_size}, options);
+  if (aclnnAddRMSNormEx(workspace_tensor.data_ptr(), workspace_size, handle, stream) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to execute add_rms_norm");
+  }
+
+  // Clean up ACL tensors
+  if (aclDestroyTensor(x_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for x");
+  }
+  if (aclDestroyTensor(residual_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for residual");
+  }
+  if (aclDestroyTensor(weight_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for weight");
+  }
+  if (aclDestroyTensor(epsilon_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for epsilon");
+  }
+  if (aclDestroyTensor(y_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for y");
+  }
+  if (aclDestroyTensor(residual_output_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for residual_output");
+  }
+
+  return std::make_tuple(y, residual_output);
+}
+
 void init_ffi_ops(py::module_ &&m) {
   m.def("swiglu", &swiglu, "Swiglu");
   m.def("grouped_matmul", &grouped_matmul, "GroupedMatMul");
+  m.def("add_rms_norm", &add_rms_norm, "AddRMSNorm");
 }
 
 }
