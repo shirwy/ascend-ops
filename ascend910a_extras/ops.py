@@ -14,6 +14,12 @@ def grouped_matmul(
     return _C.ops.grouped_matmul(x, w, group_list)
 
 
+def add_rms_norm(
+    x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, epsilon: float = 1e-5
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _C.ops.add_rms_norm(x, residual, weight, epsilon)
+
+
 def print_info():
     device_id = torch.npu.current_device()
     _C.print_info(device_id)
