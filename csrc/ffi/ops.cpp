@@ -25,7 +25,6 @@ at::Tensor swiglu(at::Tensor x) {
   auto y_strides = y.strides();
 
   aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
-  printf("stream: %p\n", stream);
   aclTensor *x_acl = aclCreateTensor(x_sizes.data(), x.dim(), ACL_FLOAT16, x_strides.data(), 0, ACL_FORMAT_ND, x_sizes.data(), x.dim(), x.data_ptr());
   if (x_acl == nullptr) {
     throw std::runtime_error("Failed to create ACL tensor");
