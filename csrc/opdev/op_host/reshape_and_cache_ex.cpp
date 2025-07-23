@@ -22,7 +22,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
   int32_t block_size = key_cache_shape->GetStorageShape().GetDim(1);
   int32_t nh16 = key_cache_shape->GetStorageShape().GetDim(2);
   int32_t h16 = key_cache_shape->GetStorageShape().GetDim(3);
-  
+
   tiling.set_num_tokens(num_tokens);
   tiling.set_num_kv_heads(num_kv_heads);
   tiling.set_head_size(head_size);

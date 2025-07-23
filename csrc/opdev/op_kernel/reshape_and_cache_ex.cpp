@@ -34,7 +34,7 @@ extern "C" __global__ __aicore__ void reshape_and_cache_ex(
     constexpr int BLOCK_SIZE = 16;
     pipe.InitBuffer(key_que, 1, sizeof(scalar_t) * BLOCK_SIZE);
     pipe.InitBuffer(key_cache_que, 1, sizeof(scalar_t) * BLOCK_SIZE);
-    
+
     // only init related queues when value and value_cache exist
     if (has_value && has_value_cache) {
         pipe.InitBuffer(value_que, 1, sizeof(scalar_t) * BLOCK_SIZE);
