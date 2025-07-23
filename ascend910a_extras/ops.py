@@ -19,6 +19,15 @@ def add_rms_norm(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return _C.ops.add_rms_norm(x, residual, weight, epsilon)
 
+def reshape_and_cache(
+    key: torch.Tensor, value: torch.Tensor, key_cache: torch.Tensor, value_cache: torch.Tensor, slot_indices: torch.Tensor
+) -> None:
+    if value is None:
+        value = torch.empty(0, device=key.device, dtype=key.dtype)
+    if value_cache is None:
+        value_cache = torch.empty(0, device=key_cache.device, dtype=key_cache.dtype)
+    return _C.ops.reshape_and_cache(key, value, key_cache, value_cache, slot_indices)
+
 
 def print_info():
     device_id = torch.npu.current_device()

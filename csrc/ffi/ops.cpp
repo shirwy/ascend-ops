@@ -3,6 +3,7 @@
 #include "aclnn_swi_glu_ex.h"
 #include "aclnn_grouped_mat_mul_ex.h"
 #include "aclnn_add_rms_norm_ex.h"
+#include "aclnn_reshape_and_cache_ex.h"
 #include "aclnn_paged_attention_ex.h"
 #include <tuple>
 
@@ -233,6 +234,79 @@ std::tuple<at::Tensor, at::Tensor> add_rms_norm(at::Tensor x, at::Tensor residua
   return std::make_tuple(y, residual_output);
 }
 
+
+void reshape_and_cache(at::Tensor key, at::Tensor value, at::Tensor key_cache, at::Tensor value_cache, at::Tensor slot_indices) {
+  TORCH_CHECK(key.dim() == 3 && key_cache.dim() == 4 && slot_indices.dim() == 1,
+              "reshape_and_cache: key must be 3D, key_cache must be 4D, slot_indices must be 1D");
+  TORCH_CHECK(key.is_contiguous() && key_cache.is_contiguous() && slot_indices.is_contiguous(),
+              "reshape_and_cache: key, key_cache, slot_indices must be contiguous tensors");
+  // value/value_cache can be empty tensor
+  if (value.numel() > 0) {
+      TORCH_CHECK(value.dim() == 3 && value.is_contiguous(), "reshape_and_cache: value must be 3D and contiguous if not None");
+  }
+  if (value_cache.numel() > 0) {
+      TORCH_CHECK(value_cache.dim() == 4 && value_cache.is_contiguous(), "reshape_and_cache: value_cache must be 4D and contiguous if not None");
+  }
+  aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+
+  // create ACL tensor
+  auto key_sizes = key.sizes();
+  auto key_strides = key.strides();
+  aclTensor* key_acl = aclCreateTensor(key_sizes.data(), key.dim(), ACL_FLOAT16, key_strides.data(), 0, ACL_FORMAT_ND, key_sizes.data(), key.dim(), key.data_ptr());
+  TORCH_CHECK(key_acl != nullptr, "Failed to create ACL tensor for key");
+
+  // value can be empty
+  aclTensor* value_acl = nullptr;
+  if (value.numel() > 0) {
+    auto value_sizes = value.sizes();
+    auto value_strides = value.strides();
+    value_acl = aclCreateTensor(value_sizes.data(), value.dim(), ACL_FLOAT16, value_strides.data(), 0, ACL_FORMAT_ND, value_sizes.data(), value.dim(), value.data_ptr());
+    TORCH_CHECK(value_acl != nullptr, "Failed to create ACL tensor for value");
+  }
+
+  auto key_cache_sizes = key_cache.sizes();
+  auto key_cache_strides = key_cache.strides();
+  aclTensor* key_cache_acl = aclCreateTensor(key_cache_sizes.data(), key_cache.dim(), ACL_FLOAT16, key_cache_strides.data(), 0, ACL_FORMAT_ND, key_cache_sizes.data(), key_cache.dim(), key_cache.data_ptr());
+  TORCH_CHECK(key_cache_acl != nullptr, "Failed to create ACL tensor for key_cache");
+
+  // value_cache can be empty
+  aclTensor* value_cache_acl = nullptr;
+  if (value_cache.numel() > 0) {
+    auto value_cache_sizes = value_cache.sizes();
+    auto value_cache_strides = value_cache.strides();
+    value_cache_acl = aclCreateTensor(value_cache_sizes.data(), value_cache.dim(), ACL_FLOAT16, value_cache_strides.data(), 0, ACL_FORMAT_ND, value_cache_sizes.data(), value_cache.dim(), value_cache.data_ptr());
+    TORCH_CHECK(value_cache_acl != nullptr, "Failed to create ACL tensor for value_cache");
+  }
+
+  auto slot_indices_sizes = slot_indices.sizes();
+  auto slot_indices_strides = slot_indices.strides();
+  aclTensor* slot_indices_acl = aclCreateTensor(slot_indices_sizes.data(), slot_indices.dim(), ACL_INT32, slot_indices_strides.data(), 0, ACL_FORMAT_ND, slot_indices_sizes.data(), slot_indices.dim(), slot_indices.data_ptr());
+  TORCH_CHECK(slot_indices_acl != nullptr, "Failed to create ACL tensor for slot_indices");
+
+  // get workspace and handle
+  uint64_t workspace_size = 0;
+  aclOpExecutor* handle = nullptr;
+  if (aclnnReshapeAndCacheExGetWorkspaceSize(key_acl, value_acl, key_cache_acl, value_cache_acl, slot_indices_acl, &workspace_size, &handle) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to get workspace size for reshape_and_cache");
+  }
+  auto options = at::TensorOptions().dtype(torch::kUInt8).device(key.device());
+  auto workspace_tensor = at::empty({(int64_t)workspace_size}, options);
+
+  // execute kernel
+  if (aclnnReshapeAndCacheEx(workspace_tensor.data_ptr(), workspace_size, handle, stream) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to execute reshape_and_cache");
+  }
+
+  // clean up
+  aclDestroyTensor(key_acl);
+  if (value_acl) aclDestroyTensor(value_acl);
+  aclDestroyTensor(key_cache_acl);
+  if (value_cache_acl) aclDestroyTensor(value_cache_acl);
+  aclDestroyTensor(slot_indices_acl);
+  return;
+}
+
+
 at::Tensor paged_attention(at::Tensor q, at::Tensor key_cache, at::Tensor value_cache, at::Tensor block_tables, at::Tensor context_lens) {
   int bs = q.size(0);
   int num_heads = q.size(1);
@@ -313,6 +387,7 @@ void init_ffi_ops(py::module_ &&m) {
   m.def("swiglu", &swiglu, "Swiglu");
   m.def("grouped_matmul", &grouped_matmul, "GroupedMatMul");
   m.def("add_rms_norm", &add_rms_norm, "AddRMSNorm");
+  m.def("reshape_and_cache", &reshape_and_cache, "ReshapeAndCache");
   m.def("paged_attention", &paged_attention, "PagedAttention");
 }
 
