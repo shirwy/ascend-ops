@@ -46,6 +46,7 @@ def prof(fn, trace_fn):
     ) as prof:
         for step in range(iter_num):
             fn()
+            torch.npu.synchronize()
             prof.step()
 
     prof.export_chrome_trace(trace_fn)
@@ -74,53 +75,174 @@ def swiglu(x):
     return out.to(x.dtype)
 
 
-# def test_model_atb():
-#     bs = 32
-#     hidden_size = 4096
-#     num_heads = 32
-#     num_kv_heads = 8
-#     head_dim = hidden_size // num_heads
-#     intermediate_size = 12288
-#     num_layers = 1
-#     rms_norm_eps = 1e-6
-#     vocab_size = 151936
+def test_model_atb():
+    bs = 32
+    hidden_size = 4096
+    num_heads = 32
+    num_kv_heads = 8
+    head_dim = hidden_size // num_heads
+    intermediate_size = 12288
+    num_layers = 2
+    rms_norm_eps = 1e-6
+    vocab_size = 151936
+    q_size = num_heads * head_dim
+    kv_size = num_kv_heads * head_dim
 
-#     num_pages = 64
-#     page_size = 128
-#     max_seqlen = 256
-#     assert bs * max_seqlen <= num_pages * page_size
+    num_pages = 64
+    page_size = 128
+    max_seqlen = 256
+    assert bs * max_seqlen <= num_pages * page_size
 
-#     token_ids = torch.randint(0, vocab_size, (bs,), dtype=torch.int32, device=device)
-#     key_cache = torch.randn(num_pages, num_kv_heads * head_dim // 16, page_size, 16, dtype=torch.float16, device=device)
-#     key_cache = torch_npu.npu_format_cast(key_cache, ACL_FORMAT_FRACTAL_NZ)
-#     key_cache_ref = key_cache.clone()
-#     key_cache_ref = torch_npu.npu_format_cast(key_cache_ref, ACL_FORMAT_FRACTAL_NZ)
-#     value_cache = torch.randn(num_pages, num_kv_heads * head_dim // 16, page_size, 16, dtype=torch.float16, device=device)
-#     value_cache = torch_npu.npu_format_cast(value_cache, ACL_FORMAT_FRACTAL_NZ)
-#     value_cache_ref = value_cache.clone()
-#     value_cache_ref = torch_npu.npu_format_cast(value_cache_ref, ACL_FORMAT_FRACTAL_NZ)
-#     position_ids = torch.full((bs,), max_seqlen - 1, dtype=torch.int32, device=device)
-#     context_lens = torch.full((bs,), max_seqlen, dtype=torch.int32, device=device)
-#     block_tables = torch.arange(0, bs * max_seqlen // page_size, dtype=torch.int32, device=device).reshape(bs, -1).contiguous()
-#     slot_mapping = torch.full((bs,), 0, dtype=torch.int32, device=device)
-#     for i in range(bs):
-#         slot_mapping[i] = (max_seqlen - 1) * (i + 1)
+    token_ids = torch.randint(0, vocab_size, (bs,), dtype=torch.int32, device=device)
+    key_cache = torch.randn(
+        num_pages,
+        num_kv_heads * head_dim // 16,
+        page_size,
+        16,
+        dtype=torch.float16,
+        device=device,
+    )
+    key_cache = torch_npu.npu_format_cast(key_cache, ACL_FORMAT_FRACTAL_NZ)
+    key_cache_ref = key_cache.clone()
+    key_cache_ref = torch_npu.npu_format_cast(key_cache_ref, ACL_FORMAT_FRACTAL_NZ)
+    value_cache = torch.randn(
+        num_pages,
+        num_kv_heads * head_dim // 16,
+        page_size,
+        16,
+        dtype=torch.float16,
+        device=device,
+    )
+    value_cache = torch_npu.npu_format_cast(value_cache, ACL_FORMAT_FRACTAL_NZ)
+    value_cache_ref = value_cache.clone()
+    value_cache_ref = torch_npu.npu_format_cast(value_cache_ref, ACL_FORMAT_FRACTAL_NZ)
+    position_ids = torch.full((bs,), max_seqlen - 1, dtype=torch.int32, device=device)
+    context_lens = torch.full((bs,), max_seqlen, dtype=torch.int32, device=device)
+    block_tables = (
+        torch.arange(0, bs * max_seqlen // page_size, dtype=torch.int32, device=device)
+        .reshape(bs, -1)
+        .contiguous()
+    )
+    slot_mapping = torch.full((bs,), 0, dtype=torch.int32, device=device)
+    for i in range(bs):
+        slot_mapping[i] = (max_seqlen - 1) * (i + 1)
 
-#     vocab_weight = torch.randn(vocab_size, hidden_size, dtype=torch.float16, device=device)
+    weights = []
+    weight_map = {}
+    vocab_weight = torch.randn(
+        vocab_size, hidden_size, dtype=torch.float16, device=device
+    )
+    weight_map["vocab_weight"] = vocab_weight
+    weights.append(vocab_weight)
+    for i in range(num_layers):
+        pre_rms_norm_weight = torch.randn(
+            hidden_size, dtype=torch.float16, device=device
+        )
+        qkv_proj = torch.randn(
+            q_size + 2 * kv_size, hidden_size, dtype=torch.float16, device=device
+        )
+        q_norm = torch.randn(head_dim, dtype=torch.float16, device=device)
+        k_norm = torch.randn(head_dim, dtype=torch.float16, device=device)
+        o_proj = torch.randn(
+            hidden_size, hidden_size, dtype=torch.float16, device=device
+        )
+        post_rms_norm_weight = torch.randn(
+            hidden_size, dtype=torch.float16, device=device
+        )
+        gate_up_proj_weight = torch.randn(
+            intermediate_size * 2, hidden_size, dtype=torch.float16, device=device
+        )
+        down_proj_weight = torch.randn(
+            hidden_size, intermediate_size, dtype=torch.float16, device=device
+        )
 
+        weight_map[f"pre_rms_norm_weight_{i}"] = pre_rms_norm_weight
+        weight_map[f"qkv_proj_{i}"] = qkv_proj
+        weight_map[f"q_norm_{i}"] = q_norm
+        weight_map[f"k_norm_{i}"] = k_norm
+        weight_map[f"o_proj_{i}"] = o_proj
+        weight_map[f"post_rms_norm_weight_{i}"] = post_rms_norm_weight
+        weight_map[f"gate_up_proj_weight_{i}"] = gate_up_proj_weight
+        weight_map[f"down_proj_weight_{i}"] = down_proj_weight
 
-#     config = graph.GraphConfig()
-#     config.batch_size = bs
-#     config.hidden_size = hidden_size
-#     config.num_heads = num_heads
-#     config.num_kv_heads = num_kv_heads
-#     config.intermediate_size = intermediate_size
-#     config.num_layers = num_layers
-#     config.rms_norm_eps = rms_norm_eps
+        weights.append(pre_rms_norm_weight)
+        weights.append(qkv_proj)
+        weights.append(q_norm)
+        weights.append(k_norm)
+        weights.append(o_proj)
+        weights.append(post_rms_norm_weight)
+        weights.append(gate_up_proj_weight)
+        weights.append(down_proj_weight)
+    final_rms_norm_weight = torch.randn(hidden_size, dtype=torch.float16, device=device)
+    weight_map["final_rms_norm_weight"] = final_rms_norm_weight
+    weights.append(final_rms_norm_weight)
 
-#     g = graph.Graph()
-#     g.build_model(config)
-#     ctx = graph.Context()
+    def fn(
+        token_ids,
+        key_cache,
+        value_cache,
+        position_ids,
+        slot_mapping,
+        block_tables,
+        context_lens,
+    ):
+        y = torch.empty_like(token_ids)
+        inputs = [
+            token_ids,
+            key_cache,
+            value_cache,
+            position_ids,
+            slot_mapping,
+            block_tables,
+            context_lens,
+        ]
+        input_formats = [
+            ACL_FORMAT_ND,
+            ACL_FORMAT_FRACTAL_NZ,
+            ACL_FORMAT_FRACTAL_NZ,
+            ACL_FORMAT_ND,
+            ACL_FORMAT_ND,
+            ACL_FORMAT_ND,
+            ACL_FORMAT_ND,
+        ]
+        ctx.setup_then_run(g, inputs, input_formats, weights, [y])
+        return y
+
+    config = graph.GraphConfig()
+    config.batch_size = bs
+    config.hidden_size = hidden_size
+    config.num_heads = num_heads
+    config.num_kv_heads = num_kv_heads
+    config.intermediate_size = intermediate_size
+    config.num_layers = num_layers
+    config.rms_norm_eps = rms_norm_eps
+
+    g = graph.Graph()
+    g.build_model(config)
+    ctx = graph.Context()
+
+    y = fn(
+        token_ids,
+        key_cache,
+        value_cache,
+        position_ids,
+        slot_mapping,
+        block_tables,
+        context_lens,
+    )
+
+    prof(
+        fn=lambda: fn(
+            token_ids,
+            key_cache,
+            value_cache,
+            position_ids,
+            slot_mapping,
+            block_tables,
+            context_lens,
+        ),
+        trace_fn=f"test_model_atb_layer{num_layers}.json",
+    )
 
 
 def test_embedding_atb():
@@ -756,7 +878,8 @@ def test_attn():
 # test_rmsnorm_with_residual_atb()
 # test_attn_atb()
 # test_paged_attn_atb()
-test_embedding_atb()
+# test_embedding_atb()
+test_model_atb()
 
 
 # test_mlp()
