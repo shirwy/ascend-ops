@@ -7,6 +7,7 @@ set(RUN_MODE "npu" CACHE STRING "run mode: npu")
 
 message("TORCH_NPU_PATH: ${TORCH_NPU_PATH}")
 message("ASCEND_HOME_PATH: ${ASCEND_HOME_PATH}")
+message("ATB_HOME_PATH: ${ATB_HOME_PATH}")
 message("SOC_VERSION: ${SOC_VERSION}")
 
 
@@ -60,6 +61,7 @@ pybind11_add_module(ascend910a_extras_C ${SRCS})
 
 add_dependencies(ascend910a_extras_C custom_opp)
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/3rd)
 
 target_include_directories(
   ascend910a_extras_C
@@ -72,6 +74,8 @@ target_include_directories(
   ${ASCEND_HOME_PATH}/aarch64-linux/include/experiment/platform
   ${ASCEND_HOME_PATH}/x86_64-linux/include/experiment/platform
   ${ASCEND_HOME_PATH}/opp/built-in/op_proto/inc
+
+  ${ATB_HOME_PATH}/include
 
   # custom opp
   ${OPP_INSTALL_DIR}/vendors/customize/op_proto/inc
@@ -86,6 +90,8 @@ target_link_directories(
   ${ASCEND_HOME_PATH}/lib64
   ${ASCEND_HOME_PATH}/compiler/lib64/stub
 
+  ${ATB_HOME_PATH}/lib
+
   # custom opp
   ${OPP_INSTALL_DIR}/vendors/customize/op_api/lib
 )
@@ -99,6 +105,8 @@ target_link_libraries(
   platform
   graph
   ge_runner
+
+  atb
 
   # custom opp
   cust_opapi

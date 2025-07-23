@@ -23,3 +23,13 @@ def add_rms_norm(
 def print_info():
     device_id = torch.npu.current_device()
     _C.print_info(device_id)
+
+
+def paged_attention(
+    q: torch.Tensor,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor,
+    block_tables: torch.Tensor,
+    context_lens: torch.Tensor,
+) -> torch.Tensor:
+    return _C.ops.paged_attention(q, key_cache, value_cache, block_tables, context_lens)

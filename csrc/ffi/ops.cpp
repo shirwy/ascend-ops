@@ -3,6 +3,7 @@
 #include "aclnn_swi_glu_ex.h"
 #include "aclnn_grouped_mat_mul_ex.h"
 #include "aclnn_add_rms_norm_ex.h"
+#include "aclnn_paged_attention_ex.h"
 #include <tuple>
 
 namespace native {
@@ -24,6 +25,7 @@ at::Tensor swiglu(at::Tensor x) {
   auto y_strides = y.strides();
 
   aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+  printf("stream: %p\n", stream);
   aclTensor *x_acl = aclCreateTensor(x_sizes.data(), x.dim(), ACL_FLOAT16, x_strides.data(), 0, ACL_FORMAT_ND, x_sizes.data(), x.dim(), x.data_ptr());
   if (x_acl == nullptr) {
     throw std::runtime_error("Failed to create ACL tensor");
@@ -232,10 +234,87 @@ std::tuple<at::Tensor, at::Tensor> add_rms_norm(at::Tensor x, at::Tensor residua
   return std::make_tuple(y, residual_output);
 }
 
+at::Tensor paged_attention(at::Tensor q, at::Tensor key_cache, at::Tensor value_cache, at::Tensor block_tables, at::Tensor context_lens) {
+  int bs = q.size(0);
+  int num_heads = q.size(1);
+  int head_dim = q.size(2);
+  // kvcache: [num_pages, num_kv_heads * head_dim / 16, page_size, 16]
+  int num_pages = key_cache.size(0);
+  int num_kv_heads = key_cache.size(1) * 16 / head_dim;
+  int page_size = key_cache.size(2);
+  printf("bs: %d, num_heads: %d, head_dim: %d, num_pages: %d, num_kv_heads: %d, page_size: %d\n", bs, num_heads, head_dim, num_pages, num_kv_heads, page_size);
+
+  uint8_t* q_ptr = reinterpret_cast<uint8_t*>(q.data_ptr());
+  uint8_t* key_cache_ptr = reinterpret_cast<uint8_t*>(key_cache.data_ptr());
+  uint8_t* value_cache_ptr = reinterpret_cast<uint8_t*>(value_cache.data_ptr());
+  uint8_t* block_tables_ptr = reinterpret_cast<uint8_t*>(block_tables.data_ptr());
+  uint8_t* context_lens_ptr = reinterpret_cast<uint8_t*>(context_lens.data_ptr());
+
+  at::Tensor y = at::empty_like(q);
+
+  aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+  aclTensor* q_acl = aclCreateTensor(q.sizes().data(), q.dim(), ACL_FLOAT16, q.strides().data(), 0, ACL_FORMAT_ND, q.sizes().data(), q.dim(), q.data_ptr());
+  if (q_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for q");
+  }
+  aclTensor* key_cache_acl = aclCreateTensor(key_cache.sizes().data(), key_cache.dim(), ACL_FLOAT16, key_cache.strides().data(), 0, ACL_FORMAT_ND, key_cache.sizes().data(), key_cache.dim(), key_cache.data_ptr());
+  if (key_cache_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for key_cache");
+  }
+  aclTensor* value_cache_acl = aclCreateTensor(value_cache.sizes().data(), value_cache.dim(), ACL_FLOAT16, value_cache.strides().data(), 0, ACL_FORMAT_ND, value_cache.sizes().data(), value_cache.dim(), value_cache.data_ptr());
+  if (value_cache_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for value_cache");
+  }
+  aclTensor* block_tables_acl = aclCreateTensor(block_tables.sizes().data(), block_tables.dim(), ACL_INT32, block_tables.strides().data(), 0, ACL_FORMAT_ND, block_tables.sizes().data(), block_tables.dim(), block_tables.data_ptr());
+  if (block_tables_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for block_tables");
+  }
+  aclTensor* context_lens_acl = aclCreateTensor(context_lens.sizes().data(), context_lens.dim(), ACL_INT32, context_lens.strides().data(), 0, ACL_FORMAT_ND, context_lens.sizes().data(), context_lens.dim(), context_lens.data_ptr());
+  if (context_lens_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for context_lens");
+  }
+  aclTensor* y_acl = aclCreateTensor(y.sizes().data(), y.dim(), ACL_FLOAT16, y.strides().data(), 0, ACL_FORMAT_ND, y.sizes().data(), y.dim(), y.data_ptr());
+  if (y_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for y");
+  }
+
+  uint64_t workspace_size = 0;
+  aclOpExecutor* handle = nullptr;
+  if (aclnnPagedAttentionExGetWorkspaceSize(q_acl, key_cache_acl, value_cache_acl, block_tables_acl, context_lens_acl, y_acl, &workspace_size, &handle) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to get workspace size");
+  }
+  auto options = at::TensorOptions().dtype(torch::kUInt8).device(q.device());
+  auto workspace_tensor = at::empty({(int64_t)workspace_size}, options);
+  if (aclnnPagedAttentionEx(workspace_tensor.data_ptr(), workspace_size, handle, stream) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to execute paged_attention");
+  }
+
+  if (aclDestroyTensor(q_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for q");
+  }
+  if (aclDestroyTensor(key_cache_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for key_cache");
+  }
+  if (aclDestroyTensor(value_cache_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for value_cache");
+  }
+  if (aclDestroyTensor(block_tables_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for block_tables");
+  }
+  if (aclDestroyTensor(context_lens_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for context_lens");
+  }
+  if (aclDestroyTensor(y_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for y");
+  }
+  return y;
+}
+
 void init_ffi_ops(py::module_ &&m) {
   m.def("swiglu", &swiglu, "Swiglu");
   m.def("grouped_matmul", &grouped_matmul, "GroupedMatMul");
   m.def("add_rms_norm", &add_rms_norm, "AddRMSNorm");
+  m.def("paged_attention", &paged_attention, "PagedAttention");
 }
 
 }

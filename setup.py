@@ -14,6 +14,9 @@ from setuptools.command.install import install
 ASCEND_HOME_PATH = os.environ.get(
     "ASCEND_HOME_PATH", "/usr/local/Ascend/ascend-toolkit/latest"
 )
+ATB_HOME_PATH = os.environ.get(
+    "ATB_HOME_PATH", "/usr/local/Ascend/nnal/atb/latest/atb/cxx_abi_0"
+)
 SOC_VERSION = os.environ.get("SOC_VERSION", "Ascend910B")
 CMAKE_BUILD_TYPE = os.environ.get("CMAKE_BUILD_TYPE", "Release")
 MAX_JOBS = os.environ.get("MAX_JOBS", None)
@@ -91,11 +94,15 @@ class cmake_build_ext(build_ext):
             f"-DSOC_VERSION={SOC_VERSION}",
             f"-DTORCH_NPU_PATH={torch_npu_path}",
             f"-DASCEND_HOME_PATH={ASCEND_HOME_PATH}",
+            f"-DATB_HOME_PATH={ATB_HOME_PATH}",
         ]
 
-        # num_jobs = self.compute_num_jobs()
+        build_tool = []
+        # if which('ninja') is not None:
+        #     build_tool += ['-G', 'Ninja']
 
         logging.info(f"cmake_args: {cmake_args}")
+        logging.info(f"build_tool: {build_tool}")
         logging.info(f"cmake_lists_dir: {ext.cmake_lists_dir}")
         logging.info(f"pwd: {os.getcwd()}")
 
@@ -108,7 +115,8 @@ class cmake_build_ext(build_ext):
             logger.info(f"build_out_path: {build_out_path} not found, skip clean")
 
         subprocess.check_call(
-            ["cmake", ext.cmake_lists_dir, *cmake_args], cwd=self.build_temp
+            ["cmake", ext.cmake_lists_dir, *build_tool, *cmake_args],
+            cwd=self.build_temp,
         )
 
     def build_extensions(self) -> None:
@@ -144,6 +152,7 @@ class cmake_build_ext(build_ext):
             "cmake",
             "--install",
             ".",
+            f"-j={num_jobs}",
         ]
 
         logger.info(f"install_args: {install_args}")
