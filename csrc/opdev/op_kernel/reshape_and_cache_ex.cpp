@@ -41,9 +41,13 @@ extern "C" __global__ __aicore__ void reshape_and_cache_ex(
         pipe.InitBuffer(value_cache_que, 1, sizeof(scalar_t) * BLOCK_SIZE);
     }
 
+    int key_buffer_size = num_tokens * num_kv_heads * head_size;
+    int key_cache_buffer_size = num_blocks * block_size * nh16 * 16;
     // transform key to key_cache
     for (int64_t i = 0; i < num_tokens; ++i) {
         int32_t slot = slot_indices_ptr[i];
+        // kernel Bound check: slot must be in the valid range
+        if (slot < 0 || slot >= nh16 * num_blocks) continue;
         int block = slot / nh16; // nh16 = 128
         int nh16_idx = slot % nh16;
         int idx = 0;
@@ -52,9 +56,12 @@ extern "C" __global__ __aicore__ void reshape_and_cache_ex(
                 if (idx < num_kv_heads * head_size) {
                     int key_src_offset = i * num_kv_heads * head_size + idx;
                     int cache_dst_offset = ((block * block_size + block_offset) * nh16 + nh16_idx) * 16 + j;
-                    key_cache_ptr[cache_dst_offset] = key_ptr[key_src_offset];
-                    if (has_value && has_value_cache) {
-                        value_cache_ptr[cache_dst_offset] = value_ptr[key_src_offset];
+                    // bound check: offset must be in the valid range
+                    if (key_src_offset < key_buffer_size && cache_dst_offset < key_cache_buffer_size) {
+                        key_cache_ptr[cache_dst_offset] = key_ptr[key_src_offset];
+                        if (has_value && has_value_cache) {
+                            value_cache_ptr[cache_dst_offset] = value_ptr[key_src_offset];
+                        }
                     }
                     idx++;
                 }
