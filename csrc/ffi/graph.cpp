@@ -182,7 +182,7 @@ public:
 
 
   uint32_t add_embedding(uint32_t token_ids) {
-    dbg(token_ids);
+    // dbg(token_ids);
     atb::Node node;
     atb::infer::GatherParam param;
     param.axis = 0;
@@ -205,7 +205,7 @@ public:
   }
 
   uint32_t add_attn(std::vector<uint32_t> xs) {
-    dbg(xs);
+    // dbg(xs);
     int num_heads = config.num_heads;
     int num_kv_heads = config.num_kv_heads;
     int head_dim = config.hidden_size / num_heads;
@@ -283,7 +283,7 @@ public:
   }
 
   std::vector<uint32_t> add_rope(uint32_t q, uint32_t k, uint32_t position_ids, uint32_t cos_cache, uint32_t sin_cache, atb::ReshapeFunc q_reshape_func, atb::ReshapeFunc k_reshape_func) {
-    dbg(q, k, position_ids, cos_cache, sin_cache);
+    // dbg(q, k, position_ids, cos_cache, sin_cache);
     uint32_t out_q = tensor_num++;
     uint32_t out_k = tensor_num++;
     atb::Node node;
@@ -312,7 +312,7 @@ public:
     atb::ReshapeFunc k_reshape_func,
     atb::ReshapeFunc v_reshape_func
   ) {
-    dbg(q, k, v, key_cache, value_cache, position_ids, slot_mapping, block_tables, context_lens);
+    // dbg(q, k, v, key_cache, value_cache, position_ids, slot_mapping, block_tables, context_lens);
     int num_heads = config.num_heads;
     int num_kv_heads = config.num_kv_heads;
     int head_dim = config.hidden_size / num_heads;
@@ -359,7 +359,7 @@ public:
   }
 
   std::vector<uint32_t> add_split(uint32_t x, int dim, std::vector<int> sizes) {
-    dbg(x, dim, sizes);
+    // dbg(x, dim, sizes);
     atb::Node node;
     atb::infer::SplitParam param;
     param.splitDim = dim;
@@ -387,7 +387,7 @@ public:
   }
 
   std::vector<uint32_t> add_rmsnorm(uint32_t x, std::optional<uint32_t> residual, float eps, atb::ReshapeFunc x_reshape_func) {
-    dbg(x, residual, eps);
+    // dbg(x, residual, eps);
     if (residual.has_value()) {
       uint32_t y_add = tensor_num++;
       atb::Node add_node;
@@ -433,7 +433,7 @@ public:
   }
 
   uint32_t add_swiglu(uint32_t x) {
-    dbg(x);
+    // dbg(x);
     uint32_t y = tensor_num++;
     atb::Node node;
     // FIXME: maybe memory leak
@@ -447,7 +447,7 @@ public:
   }
 
   uint32_t add_linear(uint32_t x, bool trans_a, bool trans_b, atb::ReshapeFunc x_reshape_func) {
-    dbg(x, trans_a, trans_b);
+    // dbg(x, trans_a, trans_b);
     atb::Node node;
 
     atb::infer::LinearParam param;
@@ -740,7 +740,7 @@ public:
 
   std::vector<std::vector<at::Tensor>> intermediate_tensors; // for splited graph
   std::vector<uint64_t> workspace_sizes;
-  std::vector<at::Tensor> workspaces;
+  uint64_t max_workspace_size = 0;
 
   Context() {
     atb::Context* raw = nullptr;
@@ -794,7 +794,7 @@ void init_ffi_graph(py::module_ &&m) {
       at::Tensor sin_cache,
       std::vector<at::Tensor> weights,
       at::Tensor out
-    ) {
+    ) -> uint64_t {
       pybind11::gil_scoped_release gil_release;
       aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
       dbg(stream);
@@ -861,7 +861,6 @@ void init_ffi_graph(py::module_ &&m) {
       self.packs.clear();
       self.intermediate_tensors.clear();
       self.workspace_sizes.clear();
-      self.workspaces.clear();
       int weight_num_offset = 0;
       for (int split_id = 0; split_id < num_split; split_id++) {
         int start_layer = split_id * num_layers_per_split;
@@ -917,11 +916,7 @@ void init_ffi_graph(py::module_ &&m) {
         uint64_t workspace_size = 0;
         CHECK_ATB(graph.ops[split_id]->Setup(pack, workspace_size, self.ctx.get()));
         dbg(split_id, workspace_size);
-        auto options = at::TensorOptions().dtype(torch::kUInt8).device(token_ids.device());
-        auto workspace = at::empty({(int64_t)workspace_size}, options);
-
         self.workspace_sizes.push_back(workspace_size);
-        self.workspaces.push_back(workspace);
         self.packs.push_back(pack);
       }
       assert(weight_num_offset == total_weight_num);
@@ -931,19 +926,17 @@ void init_ffi_graph(py::module_ &&m) {
         ss << "workspace_sizes size mismatch, expected " << num_split << ", got " << self.workspace_sizes.size();
         throw std::runtime_error(ss.str());
       }
-      if (self.workspaces.size() != num_split) {
-        std::stringstream ss;
-        ss << "workspaces size mismatch, expected " << num_split << ", got " << self.workspaces.size();
-        throw std::runtime_error(ss.str());
-      }
+      auto _max_workspace_size = std::max_element(self.workspace_sizes.begin(), self.workspace_sizes.end());
+      self.max_workspace_size = *_max_workspace_size;
+      dbg(self.max_workspace_size);
       if (self.packs.size() != num_split) {
         std::stringstream ss;
         ss << "packs size mismatch, expected " << num_split << ", got " << self.packs.size();
         throw std::runtime_error(ss.str());
       }
-
+      return self.max_workspace_size;
     })
-    .def("setup_fullgraph", [](Context& self, Graph& graph, std::vector<at::Tensor>& inputs, std::vector<int> input_formats, std::vector<at::Tensor>& weights, std::vector<at::Tensor>& outputs) {
+    .def("setup_fullgraph", [](Context& self, Graph& graph, std::vector<at::Tensor>& inputs, std::vector<int> input_formats, std::vector<at::Tensor>& weights, std::vector<at::Tensor>& outputs) -> uint64_t {
       pybind11::gil_scoped_release gil_release;
       aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
       dbg(stream);
@@ -977,7 +970,6 @@ void init_ffi_graph(py::module_ &&m) {
 
       self.packs.clear();
       self.workspace_sizes.clear();
-      self.workspaces.clear();
 
       assert(input_formats.size() == inputs.size());
       atb::VariantPack pack;
@@ -1020,31 +1012,31 @@ void init_ffi_graph(py::module_ &&m) {
       }
       uint64_t workspace_size = 0;
       CHECK_ATB(graph.ops[0]->Setup(pack, workspace_size, self.ctx.get()));
-      auto options = at::TensorOptions().dtype(torch::kUInt8).device(inputs[0].device());
       dbg(workspace_size);
-      auto workspace = at::empty({(int64_t)workspace_size}, options);
+      self.max_workspace_size = workspace_size;
+      dbg(self.max_workspace_size);
 
       self.workspace_sizes.push_back(workspace_size);
-      self.workspaces.push_back(workspace);
       self.packs.push_back(pack);
+
+      return self.max_workspace_size;
     })
-    .def("run", [](Context& self, Graph& graph) {
+    .def("run", [](Context& self, Graph& graph, at::Tensor workspace) {
       // FIXME: it will cause out of bound error when re-run with the same graph
       // So we need to use run_with_dummy_setup
       dbg("[warning] use run_with_dummy_setup instead to support re-run");
       pybind11::gil_scoped_release gil_release;
       for (int i = 0; i < graph.ops.size(); i++) {
-        CHECK_ATB(graph.ops[i]->Execute(self.packs[i], self.workspaces[i].data_ptr<uint8_t>(), self.workspace_sizes[i], self.ctx.get()));
+        CHECK_ATB(graph.ops[i]->Execute(self.packs[i], workspace.data_ptr<uint8_t>(), self.workspace_sizes[i], self.ctx.get()));
       }
     })
-    .def("run_with_dummy_setup", [](Context& self, Graph& graph) {
+    .def("run_with_dummy_setup", [](Context& self, Graph& graph, at::Tensor workspace) {
       pybind11::gil_scoped_release gil_release;
       dbg("run_with_dummy_setup resetup");
       aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
       CHECK_ATB(self.ctx->SetExecuteStream(stream));
       assert(graph.ops.size() == self.packs.size());
       assert(graph.ops.size() == self.workspace_sizes.size());
-      assert(graph.ops.size() == self.workspaces.size());
       for (int i = 0; i < graph.ops.size(); i++) {
         uint64_t workspace_size = 0;
         CHECK_ATB(graph.ops[i]->Setup(self.packs[i], workspace_size, self.ctx.get()));
@@ -1056,7 +1048,7 @@ void init_ffi_graph(py::module_ &&m) {
       }
       dbg("run_with_dummy_setup execute");
       for (int i = 0; i < graph.ops.size(); i++) {
-        CHECK_ATB(graph.ops[i]->Execute(self.packs[i], self.workspaces[i].data_ptr<uint8_t>(), self.workspace_sizes[i], self.ctx.get()));
+        CHECK_ATB(graph.ops[i]->Execute(self.packs[i], workspace.data_ptr<uint8_t>(), self.workspace_sizes[i], self.ctx.get()));
       }
     });
 
