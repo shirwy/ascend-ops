@@ -150,7 +150,9 @@ public:
     uint32_t position_ids,
     uint32_t slot_mapping,
     uint32_t block_tables,
-    uint32_t context_lens
+    uint32_t context_lens,
+    uint32_t cos_cache,
+    uint32_t sin_cache
   ) {
     float rms_norm_eps = config.rms_norm_eps;
     uint32_t hidden_states = uint32_t(-1);
@@ -166,7 +168,7 @@ public:
     }
 
     hidden_states = add_attn(
-      {hidden_states, key_cache, value_cache, position_ids, slot_mapping, block_tables, context_lens}
+      {hidden_states, key_cache, value_cache, position_ids, slot_mapping, block_tables, context_lens, cos_cache, sin_cache}
     );
 
     auto hidden_states_and_res = add_rmsnorm(hidden_states, res, rms_norm_eps, identity_reshape_func);
@@ -209,7 +211,7 @@ public:
     int head_dim = config.hidden_size / num_heads;
     float rms_norm_eps = config.rms_norm_eps;
 
-    assert(xs.size() == 7);
+    assert(xs.size() == 9);
     auto x = xs[0];
     auto key_cache = xs[1];
     auto value_cache = xs[2];
@@ -217,6 +219,8 @@ public:
     auto slot_mapping = xs[4];
     auto block_tables = xs[5];
     auto context_lens = xs[6];
+    auto cos_cache = xs[7];
+    auto sin_cache = xs[8];
 
     int q_size = num_heads * head_dim;
     int kv_size = num_kv_heads * head_dim;
@@ -248,9 +252,11 @@ public:
     auto q_norm = add_rmsnorm(q, std::nullopt, rms_norm_eps, q_reshape_func);
     auto k_norm = add_rmsnorm(k, std::nullopt, rms_norm_eps, kv_reshape_func);
 
+    auto qk_rope = add_rope(q_norm[0], k_norm[0], position_ids, cos_cache, sin_cache, identity_reshape_func, identity_reshape_func);
+
     auto attn_out = add_paged_attn(
-      q_norm[0],
-      k_norm[0],
+      qk_rope[0],
+      qk_rope[1],
       v,
       key_cache,
       value_cache,
@@ -274,6 +280,21 @@ public:
     };
     auto y = add_linear(attn_out, false, true, x_reshape_back_func);
     return y;
+  }
+
+  std::vector<uint32_t> add_rope(uint32_t q, uint32_t k, uint32_t position_ids, uint32_t cos_cache, uint32_t sin_cache, atb::ReshapeFunc q_reshape_func, atb::ReshapeFunc k_reshape_func) {
+    dbg(q, k, position_ids, cos_cache, sin_cache);
+    uint32_t out_q = tensor_num++;
+    uint32_t out_k = tensor_num++;
+    atb::Node node;
+    node.operation = new RopeEx();
+    node.inTensorIds = {q, k, position_ids, cos_cache, sin_cache};
+    node.outTensorIds = {out_q, out_k};
+    node.inTensorReshapeFuncs = {q_reshape_func, k_reshape_func, identity_reshape_func, identity_reshape_func, identity_reshape_func};
+    graph_param.nodes.push_back(node);
+    internal_ids.push_back(out_q);
+    internal_ids.push_back(out_k);
+    return {out_q, out_k};
   }
 
 
@@ -489,11 +510,11 @@ public:
       GraphBuilder builder(config);
       int input_num = 0;
       if (start_layer == 0) {
-        // input: token_ids, [key_cache, value_cache] * layer_num, position_ids, slot_mapping, block_tables, context_lens
-        input_num = 1 + 2 * (end_layer - start_layer) + 4;
+        // input: token_ids, [key_cache, value_cache] * layer_num, position_ids, slot_mapping, block_tables, context_lens, cos_cache, sin_cache
+        input_num = 1 + 2 * (end_layer - start_layer) + 4 + 2;
       } else {
-        // input: hidden_states, residual, [key_cache, value_cache] * layer_num, position_ids, slot_mapping, block_tables, context_lens
-        input_num = 1 + 1 + 2 * (end_layer - start_layer) + 4;
+        // input: hidden_states, residual, [key_cache, value_cache] * layer_num, position_ids, slot_mapping, block_tables, context_lens, cos_cache, sin_cache
+        input_num = 1 + 1 + 2 * (end_layer - start_layer) + 4 + 2;
       }
 
       std::string name = "split_" + std::to_string(split_id);
@@ -508,6 +529,8 @@ public:
         uint32_t slot_mapping = uint32_t(-1);
         uint32_t block_tables = uint32_t(-1);
         uint32_t context_lens = uint32_t(-1);
+        uint32_t cos_cache = uint32_t(-1);
+        uint32_t sin_cache = uint32_t(-1);
         if (start_layer == 0) {
           token_ids = xs[0];
           for (int i = 0; i < end_layer - start_layer; i++) {
@@ -518,6 +541,8 @@ public:
           slot_mapping = xs[2 + 2 * (end_layer - start_layer)];
           block_tables = xs[3 + 2 * (end_layer - start_layer)];
           context_lens = xs[4 + 2 * (end_layer - start_layer)];
+          cos_cache = xs[5 + 2 * (end_layer - start_layer)];
+          sin_cache = xs[6 + 2 * (end_layer - start_layer)];
 
           // build pre-layer
           hidden_states = builder.add_embedding(token_ids);
@@ -532,6 +557,8 @@ public:
           slot_mapping = xs[3 + 2 * (end_layer - start_layer)];
           block_tables = xs[4 + 2 * (end_layer - start_layer)];
           context_lens = xs[5 + 2 * (end_layer - start_layer)];
+          cos_cache = xs[6 + 2 * (end_layer - start_layer)];
+          sin_cache = xs[7 + 2 * (end_layer - start_layer)];
         }
 
         // build
@@ -544,7 +571,9 @@ public:
             position_ids,
             slot_mapping,
             block_tables,
-            context_lens
+            context_lens,
+            cos_cache,
+            sin_cache
           );
           assert(hidden_states_and_residual.size() == 2);
           hidden_states = hidden_states_and_residual[0];
@@ -602,16 +631,16 @@ public:
 
   void build_attn() {
     GraphBuilder builder(config);
-    auto op = builder.build("attn", 7, [&](std::vector<uint32_t> xs) -> std::vector<uint32_t> {
+    auto op = builder.build("attn", 9, [&](std::vector<uint32_t> xs) -> std::vector<uint32_t> {
       // x, key_cache, value_cache, position_ids, slot_mapping, block_tables, context_lens
-      assert(xs.size() == 7);
+      assert(xs.size() == 9);
       auto y = builder.add_attn(xs);
       return {y};
     });
 
     ops.push_back(op);
-    in_tensor_nums.push_back(7);
-    weight_nums.push_back(builder.in_ids.size() - 7);
+    in_tensor_nums.push_back(9);
+    weight_nums.push_back(builder.in_ids.size() - 9);
     out_tensor_nums.push_back(builder.out_ids.size());
     dbg(in_tensor_nums.back(), weight_nums.back(), out_tensor_nums.back());
   }
@@ -651,6 +680,21 @@ public:
     ops.push_back(op);
     in_tensor_nums.push_back(9);
     weight_nums.push_back(builder.in_ids.size() - 9);
+    out_tensor_nums.push_back(builder.out_ids.size());
+    dbg(in_tensor_nums.back(), weight_nums.back(), out_tensor_nums.back());
+  }
+
+  void build_rope() {
+    GraphBuilder builder(config);
+    auto op = builder.build("rope", 5, [&](std::vector<uint32_t> xs) -> std::vector<uint32_t> {
+      assert(xs.size() == 5);
+      auto ys = builder.add_rope(xs[0], xs[1], xs[2], xs[3], xs[4], builder.identity_reshape_func, builder.identity_reshape_func);
+      return ys;
+    });
+
+    ops.push_back(op);
+    in_tensor_nums.push_back(5);
+    weight_nums.push_back(builder.in_ids.size() - 5);
     out_tensor_nums.push_back(builder.out_ids.size());
     dbg(in_tensor_nums.back(), weight_nums.back(), out_tensor_nums.back());
   }
@@ -728,6 +772,7 @@ void init_ffi_graph(py::module_ &&m) {
     .def("build_embedding", &Graph::build_embedding)
     .def("build_mlp", &Graph::build_mlp)
     .def("build_paged_attn", &Graph::build_paged_attn)
+    .def("build_rope", &Graph::build_rope)
     .def("build_rmsnorm", &Graph::build_rmsnorm)
     .def("build_rmsnorm_with_residual", &Graph::build_rmsnorm_with_residual)
     .def("build_attn", &Graph::build_attn);
@@ -745,6 +790,8 @@ void init_ffi_graph(py::module_ &&m) {
       at::Tensor slot_mapping,
       at::Tensor block_tables,
       at::Tensor context_lens,
+      at::Tensor cos_cache,
+      at::Tensor sin_cache,
       std::vector<at::Tensor> weights,
       at::Tensor out
     ) {
@@ -840,6 +887,8 @@ void init_ffi_graph(py::module_ &&m) {
         pack.inTensors.push_back(to_atb_tensor(slot_mapping, ACL_FORMAT_ND));
         pack.inTensors.push_back(to_atb_tensor(block_tables, ACL_FORMAT_ND));
         pack.inTensors.push_back(to_atb_tensor(context_lens, ACL_FORMAT_ND));
+        pack.inTensors.push_back(to_atb_tensor(cos_cache, ACL_FORMAT_ND));
+        pack.inTensors.push_back(to_atb_tensor(sin_cache, ACL_FORMAT_ND));
         assert(pack.inTensors.size() == graph.in_tensor_nums[split_id]);
 
         // weight

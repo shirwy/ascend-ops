@@ -3,6 +3,7 @@
 #include <atb/operation.h>
 
 #include "aclnn_swi_glu_ex.h"
+#include "aclnn_rope_ex.h"
 #include "dbg/dbg.h"
 
 namespace native {
@@ -131,21 +132,67 @@ public:
 
   atb::Status SetAclnnWorkspaceAndExecutor() override {
     if (aclnnSwiGluExGetWorkspaceSize(in_tensors[0]->acl_tensor, out_tensors[0]->acl_tensor, &workspace_size, &acl_executor) != ACL_SUCCESS) {
-      throw std::runtime_error("Failed to get workspace size for SwiGluEx");
+      std::stringstream ss;
+      ss << "Failed to get workspace size for SwiGluEx: " << aclGetRecentErrMsg();
+      throw std::runtime_error(ss.str());
     }
     if (aclSetAclOpExecutorRepeatable(acl_executor) != ACL_SUCCESS) {
-      throw std::runtime_error("Failed to set ACL op executor repeatable for SwiGluEx");
+      std::stringstream ss;
+      ss << "Failed to set ACL op executor repeatable for SwiGluEx: " << aclGetRecentErrMsg();
+      throw std::runtime_error(ss.str());
     }
     return atb::NO_ERROR;
   };
 
   atb::Status ExecuteAclnnOp(uint8_t *workspace, aclrtStream stream) override {
     if (aclnnSwiGluEx(workspace, this->workspace_size, acl_executor, stream) != ACL_SUCCESS) {
-      throw std::runtime_error("Failed to execute SwiGluEx");
+      std::stringstream ss;
+      ss << "Failed to execute SwiGluEx: " << aclGetRecentErrMsg();
+      throw std::runtime_error(ss.str());
     }
     return atb::NO_ERROR;
   }
 };
 
+class RopeEx: public AclnnOp {
+public:
+  RopeEx(const std::string& name = "RopeEx"): AclnnOp(name) {}
+  atb::Status InferShape(const atb::SVector<atb::TensorDesc> &in_tensor_descs, atb::SVector<atb::TensorDesc> &out_tensor_descs) const override {
+    out_tensor_descs[0] = in_tensor_descs[0];
+    out_tensor_descs[1] = in_tensor_descs[1];
+    return atb::NO_ERROR;
+  }
+  uint32_t GetInputNum() const override {
+    // q, k, position_ids, cos_cache, sin_cache
+    return 5;
+  }
+  uint32_t GetOutputNum() const override {
+    // out_q, out_k
+    return 2;
+  }
+
+  atb::Status SetAclnnWorkspaceAndExecutor() override {
+    if (aclnnRopeExGetWorkspaceSize(in_tensors[0]->acl_tensor, in_tensors[1]->acl_tensor, in_tensors[2]->acl_tensor, in_tensors[3]->acl_tensor, in_tensors[4]->acl_tensor, out_tensors[0]->acl_tensor, out_tensors[1]->acl_tensor, &workspace_size, &acl_executor) != ACL_SUCCESS) {
+      std::stringstream ss;
+      ss << "Failed to get workspace size for RopeEx: " << aclGetRecentErrMsg();
+      throw std::runtime_error(ss.str());
+    }
+    if (aclSetAclOpExecutorRepeatable(acl_executor) != ACL_SUCCESS) {
+      std::stringstream ss;
+      ss << "Failed to set ACL op executor repeatable for RopeEx: " << aclGetRecentErrMsg();
+      throw std::runtime_error(ss.str());
+    }
+    return atb::NO_ERROR;
+  }
+
+  atb::Status ExecuteAclnnOp(uint8_t *workspace, aclrtStream stream) override {
+    if (aclnnRopeEx(workspace, this->workspace_size, acl_executor, stream) != ACL_SUCCESS) {
+      std::stringstream ss;
+      ss << "Failed to execute RopeEx: " << aclGetRecentErrMsg();
+      throw std::runtime_error(ss.str());
+    }
+    return atb::NO_ERROR;
+  }
+};
 
 }

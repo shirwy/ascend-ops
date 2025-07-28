@@ -4,6 +4,16 @@ import torch_npu
 import ascend910a_extras.ascend910a_extras_C as _C
 
 
+def rope(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    position_ids: torch.Tensor,
+    cos_cache: torch.Tensor,
+    sin_cache: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _C.ops.rope(q, k, position_ids, cos_cache, sin_cache)
+
+
 def swiglu(x: torch.Tensor) -> torch.Tensor:
     return _C.ops.swiglu(x)
 

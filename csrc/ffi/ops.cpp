@@ -5,9 +5,107 @@
 #include "aclnn_add_rms_norm_ex.h"
 #include "aclnn_reshape_and_cache_ex.h"
 #include "aclnn_paged_attention_ex.h"
+#include "aclnn_rope_ex.h"
 #include <tuple>
 
 namespace native {
+
+std::vector<at::Tensor> rope(at::Tensor q, at::Tensor k, at::Tensor position_ids, at::Tensor cos_cache, at::Tensor sin_cache) {
+  TORCH_CHECK(q.dim() == 3 && k.dim() == 3 && position_ids.dim() == 1 && cos_cache.dim() == 2 && sin_cache.dim() == 2,
+              "rope: input tensors must be 3D, 3D, 1D, 2D, and 2D, got ", q.dim(), "D, ", k.dim(), "D, ", position_ids.dim(), "D, ", cos_cache.dim(), "D, ", sin_cache.dim(), "D");
+  TORCH_CHECK(position_ids.size(0) == q.size(0),
+              "rope: position_ids must have the same batch size as q, got ", position_ids.size(0), " and ", q.size(0));
+  TORCH_CHECK(q.is_contiguous() && k.is_contiguous() && position_ids.is_contiguous() && cos_cache.is_contiguous() && sin_cache.is_contiguous(),
+              "rope: all input tensors must be contiguous");
+
+  int bs = q.size(0);
+  int num_heads = q.size(1);
+  int head_dim = q.size(2);
+
+  at::Tensor out_q = at::empty_like(q);
+  at::Tensor out_k = at::empty_like(k);
+
+  aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
+
+  // create ACL tensors
+  auto q_sizes = q.sizes();
+  auto q_strides = q.strides();
+  aclTensor* q_acl = aclCreateTensor(q_sizes.data(), q.dim(), ACL_FLOAT16, q_strides.data(), 0, ACL_FORMAT_ND, q_sizes.data(), q.dim(), q.data_ptr());
+  if (q_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for q");
+  }
+  auto k_sizes = k.sizes();
+  auto k_strides = k.strides();
+  aclTensor* k_acl = aclCreateTensor(k_sizes.data(), k.dim(), ACL_FLOAT16, k_strides.data(), 0, ACL_FORMAT_ND, k_sizes.data(), k.dim(), k.data_ptr());
+  if (k_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for k");
+  }
+  auto position_ids_sizes = position_ids.sizes();
+  auto position_ids_strides = position_ids.strides();
+  aclTensor* position_ids_acl = aclCreateTensor(position_ids_sizes.data(), position_ids.dim(), ACL_INT32, position_ids_strides.data(), 0, ACL_FORMAT_ND, position_ids_sizes.data(), position_ids.dim(), position_ids.data_ptr());
+  if (position_ids_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for position_ids");
+  }
+  auto cos_cache_sizes = cos_cache.sizes();
+  auto cos_cache_strides = cos_cache.strides();
+  aclTensor* cos_cache_acl = aclCreateTensor(cos_cache_sizes.data(), cos_cache.dim(), ACL_FLOAT16, cos_cache_strides.data(), 0, ACL_FORMAT_ND, cos_cache_sizes.data(), cos_cache.dim(), cos_cache.data_ptr());
+  if (cos_cache_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for cos_cache");
+  }
+  auto sin_cache_sizes = sin_cache.sizes();
+  auto sin_cache_strides = sin_cache.strides();
+  aclTensor* sin_cache_acl = aclCreateTensor(sin_cache_sizes.data(), sin_cache.dim(), ACL_FLOAT16, sin_cache_strides.data(), 0, ACL_FORMAT_ND, sin_cache_sizes.data(), sin_cache.dim(), sin_cache.data_ptr());
+  if (sin_cache_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for sin_cache");
+  }
+  auto out_q_sizes = out_q.sizes();
+  auto out_q_strides = out_q.strides();
+  aclTensor* out_q_acl = aclCreateTensor(out_q_sizes.data(), out_q.dim(), ACL_FLOAT16, out_q_strides.data(), 0, ACL_FORMAT_ND, out_q_sizes.data(), out_q.dim(), out_q.data_ptr());
+  if (out_q_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for out_q");
+  }
+  auto out_k_sizes = out_k.sizes();
+  auto out_k_strides = out_k.strides();
+  aclTensor* out_k_acl = aclCreateTensor(out_k_sizes.data(), out_k.dim(), ACL_FLOAT16, out_k_strides.data(), 0, ACL_FORMAT_ND, out_k_sizes.data(), out_k.dim(), out_k.data_ptr());
+  if (out_k_acl == nullptr) {
+    throw std::runtime_error("Failed to create ACL tensor for out_k");
+  }
+
+  uint64_t workspace_size = 0;
+  aclOpExecutor* handle = nullptr;
+  if (aclnnRopeExGetWorkspaceSize(q_acl, k_acl, position_ids_acl, cos_cache_acl, sin_cache_acl, out_q_acl, out_k_acl, &workspace_size, &handle) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to get workspace size");
+  }
+  auto options = at::TensorOptions().dtype(torch::kUInt8).device(q.device());
+  auto workspace_tensor = at::empty({(int64_t)workspace_size}, options);
+  if (aclnnRopeEx(workspace_tensor.data_ptr(), workspace_size, handle, stream) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to execute rope");
+  }
+
+  if (aclDestroyTensor(q_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for q");
+  }
+  if (aclDestroyTensor(k_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for k");
+  }
+  if (aclDestroyTensor(position_ids_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for position_ids");
+  }
+  if (aclDestroyTensor(cos_cache_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for cos_cache");
+  }
+  if (aclDestroyTensor(sin_cache_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for sin_cache");
+  }
+  if (aclDestroyTensor(out_q_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for out_q");
+  }
+  if (aclDestroyTensor(out_k_acl) != ACL_SUCCESS) {
+    throw std::runtime_error("Failed to destroy ACL tensor for out_k");
+  }
+
+  return {out_q, out_k};
+}
 
 at::Tensor swiglu(at::Tensor x) {
   TORCH_CHECK(x.dim() == 2,
@@ -384,6 +482,7 @@ at::Tensor paged_attention(at::Tensor q, at::Tensor key_cache, at::Tensor value_
 }
 
 void init_ffi_ops(py::module_ &&m) {
+  m.def("rope", &rope, "Rope");
   m.def("swiglu", &swiglu, "Swiglu");
   m.def("grouped_matmul", &grouped_matmul, "GroupedMatMul");
   m.def("add_rms_norm", &add_rms_norm, "AddRMSNorm");
