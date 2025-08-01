@@ -1024,7 +1024,7 @@ void init_ffi_graph(py::module_ &&m) {
     .def("run", [](Context& self, Graph& graph, at::Tensor workspace) {
       // FIXME: it will cause out of bound error when re-run with the same graph
       // So we need to use run_with_dummy_setup
-      dbg("[warning] use run_with_dummy_setup instead to support re-run");
+      // dbg("[warning] use run_with_dummy_setup instead to support re-run");
       pybind11::gil_scoped_release gil_release;
       for (int i = 0; i < graph.ops.size(); i++) {
         CHECK_ATB(graph.ops[i]->Execute(self.packs[i], workspace.data_ptr<uint8_t>(), self.workspace_sizes[i], self.ctx.get()));
@@ -1032,7 +1032,7 @@ void init_ffi_graph(py::module_ &&m) {
     })
     .def("run_with_dummy_setup", [](Context& self, Graph& graph, at::Tensor workspace) {
       pybind11::gil_scoped_release gil_release;
-      dbg("run_with_dummy_setup resetup");
+      // dbg("run_with_dummy_setup resetup");
       aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
       CHECK_ATB(self.ctx->SetExecuteStream(stream));
       assert(graph.ops.size() == self.packs.size());
@@ -1046,7 +1046,7 @@ void init_ffi_graph(py::module_ &&m) {
           throw std::runtime_error(ss.str());
         }
       }
-      dbg("run_with_dummy_setup execute");
+      // dbg("run_with_dummy_setup execute");
       for (int i = 0; i < graph.ops.size(); i++) {
         CHECK_ATB(graph.ops[i]->Execute(self.packs[i], workspace.data_ptr<uint8_t>(), self.workspace_sizes[i], self.ctx.get()));
       }
