@@ -1,9 +1,10 @@
-# ascend910a-extras
+# ascend-ops
 
-910A相关的算子实现
+Ascend 910A相关的算子实现，配套https://github.com/shirwy/vllm-ascend-910a仓使用
 
 验证过的容器镜像
 * `quay.io/ascend/cann:8.1.rc1-910b-openeuler22.03-py3.10`
+* `quay.io/ascend/vllm-ascend:v0.9.1rc1`
 
 ## Build
 
@@ -18,46 +19,3 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/
 
 python3 -m pip install -v -e . --no-build-isolation
 ```
-
-## 添加新算子
-
-首先写一个`op_def.json`，例如
-```json
-[
-  {
-      "op": "SwiGluEx",
-      "input_desc": [
-          {
-              "name": "x",
-              "param_type": "required",
-              "format": [
-                  "ND"
-              ],
-              "type": [
-                  "fp16"
-              ]
-          }
-      ],
-      "output_desc": [
-          {
-              "name": "y",
-              "param_type": "required",
-              "format": [
-                  "ND"
-              ],
-              "type": [
-                  "fp16"
-              ]
-          }
-      ]
-  }
-]
-```
-
-然后使用`msOpGen`在已有基础上生成新算子框架
-```bash
-# 注意-m需要是1
-msopgen gen -m 1 -i op_def.json -f pytorch -c ai_core-ascend910 -lan cpp -out ./csrc/opdev
-```
-
-在生成的代码框架里写计算逻辑，然后重新编译整个项目即可
